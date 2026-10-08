@@ -1,0 +1,69 @@
+services:
+  mongo:
+    image: mongo:7
+    restart: unless-stopped
+    volumes:
+      - mongo_data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  # redis-stack-server (not plain redis) because the semantic cache's
+  # vector index (idx:cache:sem, see semanticCache.service.js) needs the
+  # RediSearch module, which plain Redis doesn't have.
+  redis:
+    image: redis/redis-stack-server:latest
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Overridden regardless of what .env has, so the container always
+      # talks to the other containers on the compose network by service
+      # name - "mongo"/"redis" are only resolvable DNS names inside that
+      # network, not on the host (see explanation below).
+      MONGO_URI: mongodb://mongo:27017/llm-gateway
+      REDIS_URL: redis://redis:6379
+    ports:
+      - "${PORT:-3000}:3000"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  dashboard:
+    build:
+      context: ./dashboard
+      dockerfile: Dockerfile
+      args:
+        # Baked into the built JS at image-build time (see dashboard's
+        # Dockerfile) - this has to be a host-reachable URL (the browser
+        # calls it directly), not the "gateway" service name, which only
+        # resolves inside the compose network.
+        VITE_API_URL: ${VITE_API_URL:-http://localhost:3000}
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+    depends_on:
+      - gateway
+
+volumes:
+  mongo_data:
+  redis_data:

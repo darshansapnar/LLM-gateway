@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>LLM Gateway - Streaming Test</title>
+<style>
+  body { font-family: sans-serif; max-width: 700px; margin: 40px auto; padding: 0 16px; color: #222; }
+  label { display: block; font-weight: bold; margin-top: 16px; margin-bottom: 4px; }
+  input[type="text"], textarea {
+    width: 100%; font-family: inherit; font-size: 14px; padding: 6px; box-sizing: border-box;
+  }
+  textarea { height: 80px; }
+  button { margin-top: 16px; padding: 8px 16px; font-size: 14px; cursor: pointer; }
+  button:disabled { cursor: not-allowed; opacity: 0.6; }
+  #output {
+    white-space: pre-wrap; border: 1px solid #ccc; border-radius: 4px;
+    padding: 12px; min-height: 100px; margin-top: 16px; background: #fafafa;
+  }
+  #stats { font-family: monospace; font-size: 13px; color: #555; margin-top: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+  <h1>LLM Gateway - Streaming Test</h1>
+
+  <label for="apiKey">API key</label>
+  <input id="apiKey" type="text" placeholder="gw_..." />
+
+  <label for="prompt">Prompt</label>
+  <textarea id="prompt">Tell me a short story about a robot learning to paint.</textarea>
+
+  <button id="sendBtn">Send (streaming)</button>
+
+  <div id="output"></div>
+  <div id="stats"></div>
+
+  <script>
+    const sendBtn = document.getElementById("sendBtn");
+    const output = document.getElementById("output");
+    const stats = document.getElementById("stats");
+
+    sendBtn.addEventListener("click", async () => {
+      const apiKey = document.getElementById("apiKey").value.trim();
+      const prompt = document.getElementById("prompt").value;
+
+      output.textContent = "";
+      stats.textContent = "";
+      sendBtn.disabled = true;
+
+      try {
+        const response = await fetch("/v1/chat", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: "Bearer " + apiKey,
+          },
+          body: JSON.stringify({ prompt, stream: true }),
+        });
+
+        if (!response.ok) {
+          const body = await response.json().catch(() => ({}));
+          output.textContent = "Error: " + (body.error || response.status);
+          return;
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+
+          // SSE events are separated by a blank line.
+          const events = buffer.split("\n\n");
+          buffer = events.pop(); // last entry may be an incomplete event - keep for next read
+
+          for (const event of events) {
+            const line = event.trim();
+            if (!line.startsWith("data:")) continue;
+
+            const payload = JSON.parse(line.slice("data:".length).trim());
+
+            if (payload.delta) {
+              output.textContent += payload.delta;
+            } else if (payload.done) {
+              stats.textContent = JSON.stringify(payload, null, 2);
+            } else if (payload.error) {
+              stats.textContent = "Error: " + payload.error;
+            }
+          }
+        }
+      } catch (err) {
+        output.textContent += "\n[stream failed: " + err.message + "]";
+      } finally {
+        sendBtn.disabled = false;
+      }
+    });
+  </script>
+</body>
+</html>

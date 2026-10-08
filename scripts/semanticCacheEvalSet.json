@@ -1,0 +1,362 @@
+[
+  {
+    "promptA": "How do I start a node server?",
+    "promptB": "What command launches a node.js server?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What's the capital of France?",
+    "promptB": "Which city is the capital of France?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How much does a Tesla Model 3 cost?",
+    "promptB": "What is the price of a Tesla Model 3?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "Explain recursion in simple terms",
+    "promptB": "Can you explain recursion like I'm five?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I reverse a string in Python?",
+    "promptB": "What's the way to reverse a string using Python?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the boiling point of water?",
+    "promptB": "At what temperature does water boil?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I delete a git branch?",
+    "promptB": "What's the command to remove a git branch?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "Summarize the plot of Romeo and Juliet",
+    "promptB": "Give me a brief summary of Romeo and Juliet's story",
+    "shouldMatch": true,
+    "split": "test"
+  },
+  {
+    "promptA": "How many planets are in the solar system?",
+    "promptB": "What is the total number of planets in our solar system?",
+    "shouldMatch": true,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I install npm packages?",
+    "promptB": "What's the command for installing npm packages?",
+    "shouldMatch": true,
+    "split": "test"
+  },
+  {
+    "promptA": "What causes rainbows?",
+    "promptB": "Why do rainbows form?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I center a div in CSS?",
+    "promptB": "What's the CSS way to horizontally center a div?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is machine learning?",
+    "promptB": "Can you define machine learning?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I convert Celsius to Fahrenheit?",
+    "promptB": "What's the formula for converting Celsius to Fahrenheit?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What's the difference between let and var in JavaScript?",
+    "promptB": "How is let different from var in JS?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I start a node server?",
+    "promptB": "How do I stop a node server?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I increase array size in Java?",
+    "promptB": "How do I decrease array size in Java?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the largest country in the world?",
+    "promptB": "What is the smallest country in the world?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I add a user to a group in Linux?",
+    "promptB": "How do I remove a user from a group in Linux?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "What is the tallest mountain on Earth?",
+    "promptB": "What is the deepest ocean on Earth?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I turn on dark mode in VS Code?",
+    "promptB": "How do I turn off dark mode in VS Code?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I lock a file in git?",
+    "promptB": "How do I unlock a file in git?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What's the fastest land animal?",
+    "promptB": "What's the slowest land animal?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I increase font size in CSS?",
+    "promptB": "How do I decrease font size in CSS?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I connect to a database?",
+    "promptB": "How do I disconnect from a database?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the oldest programming language?",
+    "promptB": "What is the newest programming language?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I enable notifications on Android?",
+    "promptB": "How do I disable notifications on Android?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the hottest planet in the solar system?",
+    "promptB": "What is the coldest planet in the solar system?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I merge two branches in git?",
+    "promptB": "How do I split a branch into two in git?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I open a port on a firewall?",
+    "promptB": "How do I close a port on a firewall?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I exit vim?",
+    "promptB": "What's the command to quit vim?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What's the weather like today?",
+    "promptB": "Can you tell me today's weather?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I check my IP address?",
+    "promptB": "What's the way to find my IP address?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is a REST API?",
+    "promptB": "Can you explain what a REST API is?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I undo my last git commit?",
+    "promptB": "What's the command to revert the most recent git commit?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the time complexity of binary search?",
+    "promptB": "How fast is binary search, in big-O terms?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I create a new React component?",
+    "promptB": "What's the process for making a new component in React?",
+    "shouldMatch": true,
+    "split": "tune"
+  },
+  {
+    "promptA": "What does HTTP 404 mean?",
+    "promptB": "What is an HTTP 404 error?",
+    "shouldMatch": true,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I check if a number is prime?",
+    "promptB": "What's the way to determine whether a number is prime?",
+    "shouldMatch": true,
+    "split": "test"
+  },
+  {
+    "promptA": "What is a closure in JavaScript?",
+    "promptB": "Can you explain closures in JS?",
+    "shouldMatch": true,
+    "split": "test"
+  },
+  {
+    "promptA": "What is the capital of France?",
+    "promptB": "What is the capital of Spain?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I reverse a string in Python?",
+    "promptB": "How do I reverse a string in Java?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I install React?",
+    "promptB": "How do I install Vue?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the population of India?",
+    "promptB": "What is the population of China?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I create a list in Python?",
+    "promptB": "How do I create a list in JavaScript?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the boiling point of water?",
+    "promptB": "What is the boiling point of ethanol?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I sort an array in JavaScript?",
+    "promptB": "How do I sort an array in Python?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "Who is the president of the United States?",
+    "promptB": "Who is the president of France?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "What is the currency of Japan?",
+    "promptB": "What is the currency of South Korea?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I connect to MySQL in Node.js?",
+    "promptB": "How do I connect to PostgreSQL in Node.js?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "What is the tallest building in the world?",
+    "promptB": "What is the tallest building in New York?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I deploy a Node app to Heroku?",
+    "promptB": "How do I deploy a Node app to AWS?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What's the speed of light?",
+    "promptB": "What's the speed of sound?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I format a date in JavaScript?",
+    "promptB": "How do I format a date in Python?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What is the national language of Brazil?",
+    "promptB": "What is the national language of Mexico?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I create a virtual environment in Python?",
+    "promptB": "How do I create a virtual environment in Ruby?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "What's the GDP of the United States?",
+    "promptB": "What's the GDP of Germany?",
+    "shouldMatch": false,
+    "split": "tune"
+  },
+  {
+    "promptA": "How do I write a for loop in C++?",
+    "promptB": "How do I write a for loop in Rust?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "What is the main export of Saudi Arabia?",
+    "promptB": "What is the main export of Brazil?",
+    "shouldMatch": false,
+    "split": "test"
+  },
+  {
+    "promptA": "How do I center text in CSS?",
+    "promptB": "How do I center text in Tailwind CSS?",
+    "shouldMatch": false,
+    "split": "test"
+  }
+]

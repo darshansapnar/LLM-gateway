@@ -1,0 +1,180 @@
+@import "tailwindcss";
+
+/*
+  Design tokens as real CSS custom properties (not compile-time Tailwind
+  theme values). Every token below is referenced by Tailwind utilities
+  generated from `@theme` (e.g. `--color-surface` -> `bg-surface`), and
+  `[data-theme="dark"]` simply overrides the same custom properties -
+  because CSS variables are resolved at paint time, every utility that
+  uses them repaints automatically when the attribute toggles. No `dark:`
+  variants needed anywhere else in the app.
+*/
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Page / surfaces */
+  --color-bg: #f7f7f5;
+  --color-surface: #ffffff;
+  --color-surface-2: #f3f3f0;
+  --color-line: #e5e4df;
+
+  /* Ink (text) */
+  --color-ink: #1f2328;
+  --color-ink-soft: #57564f;
+  --color-ink-muted: #8c8a83;
+
+  /* Accent (indigo) */
+  --color-accent: #4f46e5;
+  --color-accent-strong: #4338ca;
+  --color-accent-soft: #eef2ff;
+  --color-accent-soft-ink: #4338ca;
+
+  /* Status pastels */
+  --color-good: #22c55e;
+  --color-good-bg: #dcfce7;
+  --color-good-ink: #15803d;
+  --color-warn: #f59e0b;
+  --color-warn-bg: #fef3c7;
+  --color-warn-ink: #a16207;
+  --color-bad: #ef4444;
+  --color-bad-bg: #fee2e2;
+  --color-bad-ink: #b91c1c;
+  --color-neutral-bg: #f1f5f4;
+  --color-neutral-ink: #57564f;
+
+  /* Chart furniture + validated CVD-safe categorical series (see
+     dataviz skill palette.md) - muted on purpose, not saturated. */
+  --color-chart-grid: #e4e4e0;
+  --color-chart-axis: #c7c6bd;
+  --color-chart-muted: #8c8a83;
+  --color-series-1: #2a78d6; /* blue */
+  --color-series-2: #eb6834; /* orange */
+  --color-series-3: #1baf7a; /* aqua */
+  --color-series-4: #eda100; /* yellow */
+  --color-series-5: #e87ba4; /* magenta */
+  --color-series-6: #008300; /* green */
+  --color-series-7: #4a3aa7; /* violet */
+  --color-series-8: #e34948; /* red */
+}
+
+[data-theme="dark"] {
+  --color-bg: #0d0d0d;
+  --color-surface: #17171a;
+  --color-surface-2: #202024;
+  --color-line: rgba(255, 255, 255, 0.1);
+
+  --color-ink: #f4f4f3;
+  --color-ink-soft: #c3c2b7;
+  --color-ink-muted: #8f8d87;
+
+  --color-accent: #818cf8;
+  --color-accent-strong: #a5b4fc;
+  --color-accent-soft: rgba(99, 102, 241, 0.16);
+  --color-accent-soft-ink: #a5b4fc;
+
+  --color-good: #34d399;
+  --color-good-bg: rgba(52, 211, 153, 0.14);
+  --color-good-ink: #6ee7b7;
+  --color-warn: #fbbf24;
+  --color-warn-bg: rgba(251, 191, 36, 0.14);
+  --color-warn-ink: #fcd34d;
+  --color-bad: #f87171;
+  --color-bad-bg: rgba(248, 113, 113, 0.14);
+  --color-bad-ink: #fca5a5;
+  --color-neutral-bg: rgba(255, 255, 255, 0.08);
+  --color-neutral-ink: #c3c2b7;
+
+  --color-chart-grid: #2c2c2a;
+  --color-chart-axis: #3a3a37;
+  --color-chart-muted: #8f8d87;
+  --color-series-1: #3987e5;
+  --color-series-2: #d95926;
+  --color-series-3: #199e70;
+  --color-series-4: #c98500;
+  --color-series-5: #d55181;
+  --color-series-6: #15c215;
+  --color-series-7: #9085e9;
+  --color-series-8: #e66767;
+}
+
+body {
+  background: var(--color-bg);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular figures for anything that must line up in a column. */
+.font-mono,
+table td,
+table th {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin, unobtrusive scrollbar for the slide-over panel and tables. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-line) transparent;
+}
+
+/* ---- Request Flow page: node pulse / shake / progress ring ---- */
+
+@keyframes flow-node-pulse-kf {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 var(--color-accent-soft);
+  }
+  50% {
+    box-shadow: 0 0 16px 5px var(--color-accent-soft);
+  }
+}
+.flow-node-pulse {
+  animation: flow-node-pulse-kf 1.1s ease-in-out infinite;
+}
+
+@keyframes flow-node-shake-kf {
+  10%,
+  90% {
+    transform: translateX(-1px);
+  }
+  20%,
+  80% {
+    transform: translateX(2px);
+  }
+  30%,
+  50%,
+  70% {
+    transform: translateX(-4px);
+  }
+  40%,
+  60% {
+    transform: translateX(4px);
+  }
+}
+.flow-node-shake {
+  animation: flow-node-shake-kf 0.4s ease-in-out 1;
+}
+
+@keyframes flow-node-progress-kf {
+  from {
+    width: 0%;
+  }
+  to {
+    width: 100%;
+  }
+}
+.flow-node-progress {
+  width: 0%;
+  animation-name: flow-node-progress-kf;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-node-pulse,
+  .flow-node-shake,
+  .flow-node-progress {
+    animation: none !important;
+  }
+}
