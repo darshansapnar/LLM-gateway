@@ -23,7 +23,7 @@ function FilterChip({ value, onChange, options, allLabel }) {
 }
 
 const PROVIDERS = ["groq", "gemini", "openrouter", "none"];
-const STATUSES = ["success", "error", "cancelled"];
+const STATUSES = ["success", "error", "cancelled", "blocked"];
 const CACHE_TYPES = ["exact", "semantic", "none"];
 
 export default function RequestFilters({ filters, onChange }) {

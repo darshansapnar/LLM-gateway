@@ -2,6 +2,7 @@ import { Inbox, Loader2 } from "lucide-react";
 import Badge from "../common/Badge.jsx";
 import EmptyState from "../common/EmptyState.jsx";
 import CacheBanner from "./CacheBanner.jsx";
+import PiiBanner from "./PiiBanner.jsx";
 import ResponseTabs from "./ResponseTabs.jsx";
 import { formatLatency } from "../../lib/format.js";
 
@@ -58,6 +59,13 @@ export default function ResponsePanel({ loading, loadingLabel, frontendError, re
               All providers failed - see the Metadata tab for the attempts list.
             </div>
           )}
+
+          <PiiBanner
+            status={response.status}
+            piiTypes={response.json?.piiTypes ?? response.json?.types}
+            piiRedacted={response.json?.piiRedacted}
+            maskedPrompt={response.json?.maskedPrompt}
+          />
 
           <CacheBanner
             xCache={response.headersObj?.["x-cache"]}

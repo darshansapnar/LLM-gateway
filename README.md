@@ -1,8 +1,13 @@
 # LLM Gateway
 
-A middleware server between apps and AI providers (Groq, Gemini). Handles caching (exact +
-semantic), rate limiting, provider fallback, streaming, cost tracking, and ships with a React
-dashboard for monitoring and managing API keys.
+A middleware server between apps and AI providers (Groq, Gemini). Features:
+
+- Caching (exact-match + semantic/meaning-based, with a verification pipeline to avoid wrong hits)
+- Rate limiting and provider fallback (Groq → Gemini)
+- Streaming (Server-Sent Events)
+- Cost tracking
+- **PII redaction** - detects emails, phone numbers, card numbers, Aadhaar, PAN, and API keys/secrets in prompts, masks them before they reach the provider or any cache/database, and restores the real values only for the original caller. See [`docs/pii-redaction.md`](./docs/pii-redaction.md).
+- A React dashboard for monitoring and managing API keys
 
 See [`CLAUDE.md`](./CLAUDE.md) for the full technical write-up of how each piece works.
 

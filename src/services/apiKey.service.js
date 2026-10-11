@@ -22,7 +22,15 @@ export function hashKey(key) {
 // persisted anywhere - this return value is the only place it ever exists
 // after this function returns, so the caller must hand it to the user
 // immediately (print it / show it once) or it's gone for good.
-export async function createApiKey({ name, requestsPerMinute, tokensPerDay, semanticCacheEnabled }) {
+export async function createApiKey({
+  name,
+  requestsPerMinute,
+  tokensPerDay,
+  semanticCacheEnabled,
+  piiMode,
+  piiTypes,
+  restoreInResponse,
+}) {
   const rawKey = "gw_" + crypto.randomBytes(16).toString("hex"); // 32 random hex chars
 
   const key = await ApiKey.create({
@@ -32,6 +40,9 @@ export async function createApiKey({ name, requestsPerMinute, tokensPerDay, sema
     ...(requestsPerMinute !== undefined ? { requestsPerMinute } : {}),
     ...(tokensPerDay !== undefined ? { tokensPerDay } : {}),
     ...(semanticCacheEnabled !== undefined ? { semanticCacheEnabled } : {}),
+    ...(piiMode !== undefined ? { piiMode } : {}),
+    ...(piiTypes !== undefined ? { piiTypes } : {}),
+    ...(restoreInResponse !== undefined ? { restoreInResponse } : {}),
   });
 
   return { key, rawKey };

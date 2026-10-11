@@ -39,6 +39,8 @@ app.use(
       "X-RateLimit-Remaining",
       "Retry-After",
       "X-Request-Id",
+      "X-PII-Redacted",
+      "X-PII-Mode",
     ],
   })
 );

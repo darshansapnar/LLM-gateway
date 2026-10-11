@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Activity, CheckCircle2, Clock, DollarSign, Gauge, PiggyBank, Timer } from "lucide-react";
+import { Activity, CheckCircle2, Clock, DollarSign, Gauge, PiggyBank, ShieldCheck, Timer } from "lucide-react";
 import { usePolling } from "../hooks/usePolling.js";
 import { getOverview, getTimeseries, getProviders, getLogs } from "../api.js";
 import PageHeader from "../components/layout/PageHeader.jsx";
@@ -13,6 +13,17 @@ import SourceDonutChart from "../components/charts/SourceDonutChart.jsx";
 import CostBarChart from "../components/charts/CostBarChart.jsx";
 import { formatNumber, formatPercent, formatUsd, formatLatency, formatRelativeTime } from "../lib/format.js";
 import { requestStatusTone } from "../lib/badgeTone.js";
+
+// Builds the "Sensitive items protected" KPI's secondary line, e.g.
+// "EMAIL 12 · CARD 4 · 2 blocked" - only the types that actually occurred,
+// sorted highest-count first, plus the blocked count if any requests were
+// rejected outright (piiMode "block").
+function piiBreakdownLabel(breakdown, blockedCount) {
+  const entries = Object.entries(breakdown || {}).sort((a, b) => b[1] - a[1]);
+  const parts = entries.map(([type, count]) => `${type} ${formatNumber(count)}`);
+  if (blockedCount) parts.push(`${formatNumber(blockedCount)} blocked`);
+  return parts.length > 0 ? parts.join(" · ") : "none this range";
+}
 
 // The landing page: KPI cards for the selected range, the three timeseries
 // charts, and a "recent requests" peek. Everything here polls every 10s and
@@ -88,6 +99,12 @@ export default function Overview({ adminKey, onOpenMobileNav }) {
               label="Fallback rate"
               value={formatPercent(overview.data.fallbackRate)}
               secondary={`${formatNumber(overview.data.judgeCalls)} judge calls · ${formatUsd(overview.data.judgeCostUsd)}`}
+            />
+            <KpiCard
+              icon={ShieldCheck}
+              label="Sensitive items protected"
+              value={formatNumber(overview.data.piiRedactedTotal)}
+              secondary={piiBreakdownLabel(overview.data.piiTypeBreakdown, overview.data.piiBlockedCount)}
             />
           </div>
 

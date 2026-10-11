@@ -8,6 +8,7 @@
     "dev": "nodemon src/index.js",
     "create-key": "node scripts/createApiKey.js",
     "eval-cache": "node scripts/evalSemanticCache.js",
+    "eval-pii": "node scripts/evalPii.js",
     "clear-semantic-cache": "node scripts/clearSemanticCache.js",
     "install:dashboard": "npm --prefix dashboard install",
     "dev:dashboard": "npm --prefix dashboard run dev",

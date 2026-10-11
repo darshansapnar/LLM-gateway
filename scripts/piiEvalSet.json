@@ -1,0 +1,49 @@
+[
+  { "id": "email-1", "text": "Please reach me at alice.wonder@example.com if you have questions.", "expectedTypes": ["EMAIL"] },
+  { "id": "email-2", "text": "Send the invoice to test.user99@mailinator.com by Friday.", "expectedTypes": ["EMAIL"] },
+  { "id": "email-3", "text": "My work email is r.kapoor@fakecorp.in, use that one.", "expectedTypes": ["EMAIL"] },
+  { "id": "email-4", "text": "Notifications go to dev_ops_bot@sampledomain.io automatically.", "expectedTypes": ["EMAIL"] },
+
+  { "id": "phone-1", "text": "You can call me on 9876543210 anytime after 6pm.", "expectedTypes": ["PHONE_IN"] },
+  { "id": "phone-2", "text": "Her number is +91 98765 43210, saved under Priya.", "expectedTypes": ["PHONE_IN"] },
+  { "id": "phone-3", "text": "Contact the office at 91-7000012345 for support.", "expectedTypes": ["PHONE_IN"] },
+  { "id": "phone-4", "text": "Delivery guy will ring 08123456789 before arriving.", "expectedTypes": ["PHONE_IN"] },
+
+  { "id": "card-1", "text": "Please charge 4111 1111 1111 1111 for the subscription.", "expectedTypes": ["CARD"] },
+  { "id": "card-2", "text": "Card on file: 5500-0055-5555-5559, expires next year.", "expectedTypes": ["CARD"] },
+  { "id": "card-3", "text": "My Amex is 340000000000009, use it for the deposit.", "expectedTypes": ["CARD"] },
+  { "id": "card-4", "text": "Refund it back to 6011 1111 1111 1117 please.", "expectedTypes": ["CARD"] },
+
+  { "id": "aadhaar-1", "text": "My Aadhaar number is 234567890124 for KYC verification.", "expectedTypes": ["AADHAAR"] },
+  { "id": "aadhaar-2", "text": "Please link 987654321096 to the new account.", "expectedTypes": ["AADHAAR"] },
+  { "id": "aadhaar-3", "text": "Aadhaar on record: 456789012341, uploaded yesterday.", "expectedTypes": ["AADHAAR"] },
+  { "id": "aadhaar-4", "text": "UID 345678901238 was used for the address proof.", "expectedTypes": ["AADHAAR"] },
+
+  { "id": "pan-1", "text": "My PAN is BNZPQ1234L for the tax filing.", "expectedTypes": ["PAN"] },
+  { "id": "pan-2", "text": "PAN card number ABCPD5678K is attached.", "expectedTypes": ["PAN"] },
+  { "id": "pan-3", "text": "Please verify PAN ZXWQR9012M against the form.", "expectedTypes": ["PAN"] },
+  { "id": "pan-4", "text": "Employer has PAN LMNOP3456N on file.", "expectedTypes": ["PAN"] },
+
+  { "id": "secret-1", "text": "Here's the key: sk-ABC123DEF456GHI789, don't commit it.", "expectedTypes": ["SECRET"] },
+  { "id": "secret-2", "text": "Use token gsk_1234567890abcdefXYZ for the Groq call.", "expectedTypes": ["SECRET"] },
+  { "id": "secret-3", "text": "AWS key AKIAABCDEFGHIJKL1234 was rotated today.", "expectedTypes": ["SECRET"] },
+  { "id": "secret-4", "text": "Set api_key=\"supersecretvalue123\" in the config file.", "expectedTypes": ["SECRET"] },
+
+  { "id": "mixed-1", "text": "Reach Rohit at rohit.sharma@example.com or 9988776655.", "expectedTypes": ["EMAIL", "PHONE_IN"] },
+  { "id": "mixed-2", "text": "Support contact: help@fakecorp.in, phone +91 90000 11122.", "expectedTypes": ["EMAIL", "PHONE_IN"] },
+
+  { "id": "neg-orderid-1", "text": "Order ID: 1234 5678 9012 3458 was shipped today.", "expectedTypes": [] },
+  { "id": "neg-orderid-2", "text": "Invoice #9876 5432 1098 7651 is now overdue.", "expectedTypes": [] },
+  { "id": "neg-random16-1", "text": "Reference code 1111 2222 3333 4445 for the warranty claim.", "expectedTypes": [] },
+  { "id": "neg-random16-2", "text": "Tracking number 5555666677778888 shows out for delivery.", "expectedTypes": [] },
+  { "id": "neg-verhoeff-1", "text": "Ticket number 234567890125 was closed by support.", "expectedTypes": [] },
+  { "id": "neg-verhoeff-2", "text": "Batch code 987654321097 failed inspection.", "expectedTypes": [] },
+  { "id": "neg-leading01-1", "text": "Serial number 198765432109 is printed on the box.", "expectedTypes": [] },
+  { "id": "neg-leading01-2", "text": "Device ID 034567890123 was flashed at the factory.", "expectedTypes": [] },
+  { "id": "neg-date", "text": "The meeting is on 15/03/2024 at noon, don't be late.", "expectedTypes": [] },
+  { "id": "neg-price", "text": "That will cost ₹45000 total, including delivery.", "expectedTypes": [] },
+  { "id": "neg-wrongphone", "text": "Order support line: 5000112233 is open 24/7.", "expectedTypes": [] },
+  { "id": "neg-password-prose", "text": "Please make sure your password is strong and unique.", "expectedTypes": [] },
+  { "id": "neg-plain-1", "text": "The weather today is sunny with a light breeze.", "expectedTypes": [] },
+  { "id": "neg-alphanumeric", "text": "Tracking code AB123456789CD was scanned at the depot.", "expectedTypes": [] }
+]

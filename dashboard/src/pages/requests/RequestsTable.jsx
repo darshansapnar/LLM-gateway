@@ -4,7 +4,7 @@ import { SkeletonTableRows } from "../../components/common/Skeleton.jsx";
 import { formatLatency, formatNumber, formatRelativeTime, formatUsd } from "../../lib/format.js";
 import { cacheTypeTone, requestStatusTone } from "../../lib/badgeTone.js";
 
-const COLUMNS = ["Time", "Provider", "Status", "Cache", "Latency", "Tokens", "Cost", "Prompt"];
+const COLUMNS = ["Time", "Provider", "Status", "Cache", "PII", "Latency", "Tokens", "Cost", "Prompt"];
 
 export default function RequestsTable({ logs, loading, onSelect }) {
   return (
@@ -37,6 +37,17 @@ export default function RequestsTable({ logs, loading, onSelect }) {
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5">
                     <Badge tone={cacheTypeTone(log.cacheType)}>{log.cacheType}</Badge>
+                  </td>
+                  <td className="whitespace-nowrap px-4 py-2.5">
+                    {log.piiRedacted > 0 ? (
+                      <Badge tone="warn" className="max-w-[160px]">
+                        <span className="truncate">
+                          {log.piiRedacted} redacted{log.piiTypes?.length ? ` (${log.piiTypes.join(", ")})` : ""}
+                        </span>
+                      </Badge>
+                    ) : (
+                      <span className="text-xs text-ink-muted">—</span>
+                    )}
                   </td>
                   <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-ink-soft">{formatLatency(log.latencyMs)}</td>
                   <td className="whitespace-nowrap px-4 py-2.5 font-mono text-xs text-ink-soft">

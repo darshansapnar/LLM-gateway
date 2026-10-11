@@ -13,8 +13,16 @@ const requestLogSchema = new mongoose.Schema({
   outputTokens: { type: Number, default: 0 },
   totalTokens: { type: Number, default: 0 },
   latencyMs: { type: Number, required: true },
-  status: { type: String, enum: ["success", "error", "cancelled"], required: true },
+  status: { type: String, enum: ["success", "error", "cancelled", "blocked"], required: true },
   errorMessage: { type: String },
+  // PII redaction (Stage 8, see docs/pii-redaction.md). `prompt`/`response`
+  // above always hold the MASKED text when piiMode isn't "off" - never the
+  // real values - so these two fields are the only trace of what kind of
+  // sensitive data was involved. piiRedacted counts every occurrence found
+  // across the prompt AND (on a fresh, non-cached answer) the response;
+  // piiTypes is the distinct set of types among them.
+  piiRedacted: { type: Number, default: 0 },
+  piiTypes: { type: [String], default: [] },
   cacheHit: { type: Boolean, default: false },
   cacheType: { type: String, enum: ["exact", "semantic", "none"], default: "none" },
   similarity: { type: Number, default: null },

@@ -1,14 +1,17 @@
 import { useState } from "react";
-import { Plus, Trash2 } from "lucide-react";
+import { Plus, Settings2, Trash2 } from "lucide-react";
 import { usePolling } from "../hooks/usePolling.js";
 import { getKeys, patchKey, deleteKey } from "../api.js";
 import PageHeader from "../components/layout/PageHeader.jsx";
 import ErrorBanner from "../components/common/ErrorBanner.jsx";
 import EmptyState from "../components/common/EmptyState.jsx";
 import ProgressBar from "../components/common/ProgressBar.jsx";
+import Badge from "../components/common/Badge.jsx";
 import { SkeletonTableRows } from "../components/common/Skeleton.jsx";
 import CreateKeyDialog from "./apikeys/CreateKeyDialog.jsx";
+import EditPiiDialog from "./apikeys/EditPiiDialog.jsx";
 import { formatNumber } from "../lib/format.js";
+import { piiModeTone } from "../lib/badgeTone.js";
 
 function ToggleButton({ on, disabled, onClick, onLabel, offLabel }) {
   return (
@@ -42,6 +45,7 @@ export default function ApiKeysPage({ adminKey, onOpenMobileNav, onUseKeyInPlayg
   const { data, loading, error, lastUpdated, reload } = usePolling(() => getKeys(adminKey), [adminKey]);
   const [pending, setPending] = useState(null);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingPiiKey, setEditingPiiKey] = useState(null);
 
   async function toggle(key, field) {
     setPending(key.id);
@@ -97,7 +101,7 @@ export default function ApiKeysPage({ adminKey, onOpenMobileNav, onUseKeyInPlayg
             <table className="w-full text-left text-sm">
               <thead>
                 <tr className="border-b border-line bg-surface-2">
-                  {["Name", "Prefix", "Limits", "Usage", "Active", "Semantic cache", ""].map((col) => (
+                  {["Name", "Prefix", "Limits", "Usage", "Active", "Semantic cache", "PII", ""].map((col) => (
                     <th key={col} className="whitespace-nowrap px-4 py-2.5 text-xs font-semibold text-ink-soft">
                       {col}
                     </th>
@@ -106,7 +110,7 @@ export default function ApiKeysPage({ adminKey, onOpenMobileNav, onUseKeyInPlayg
               </thead>
               <tbody className="divide-y divide-line">
                 {loading ? (
-                  <SkeletonTableRows rows={4} cols={7} />
+                  <SkeletonTableRows rows={4} cols={8} />
                 ) : (
                   data?.map((key) => (
                     <tr key={key.id}>
@@ -143,6 +147,22 @@ export default function ApiKeysPage({ adminKey, onOpenMobileNav, onUseKeyInPlayg
                           onLabel="On"
                           offLabel="Off"
                         />
+                      </td>
+                      <td className="whitespace-nowrap px-4 py-3">
+                        <button
+                          type="button"
+                          onClick={() => setEditingPiiKey(key)}
+                          title="Edit PII settings"
+                          className="inline-flex items-center gap-1.5 rounded-full hover:opacity-80"
+                        >
+                          <Badge tone={piiModeTone(key.piiMode)}>{key.piiMode}</Badge>
+                          <Settings2 size={12} className="text-ink-muted" />
+                        </button>
+                        {key.piiMode !== "off" && (
+                          <div className="mt-1 text-xs text-ink-muted">
+                            {key.piiTypes?.length ?? 0} types · restore {key.restoreInResponse ? "on" : "off"}
+                          </div>
+                        )}
                       </td>
                       <td className="whitespace-nowrap px-4 py-3 text-right">
                         <button
@@ -181,6 +201,15 @@ export default function ApiKeysPage({ adminKey, onOpenMobileNav, onUseKeyInPlayg
                 }
               : undefined
           }
+        />
+      )}
+
+      {editingPiiKey && (
+        <EditPiiDialog
+          adminKey={adminKey}
+          apiKey={editingPiiKey}
+          onClose={() => setEditingPiiKey(null)}
+          onSaved={reload}
         />
       )}
     </section>

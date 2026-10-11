@@ -45,6 +45,11 @@ export default function RequestDetailPanel({ log, onClose }) {
             </Badge>
             <Badge tone={cacheTypeTone(log.cacheType)}>{log.cacheType} cache</Badge>
             {log.fallbackUsed && <Badge tone="warn">fallback used</Badge>}
+            {log.piiRedacted > 0 && (
+              <Badge tone="warn">
+                {log.piiRedacted} redacted{log.piiTypes?.length ? ` (${log.piiTypes.join(", ")})` : ""}
+              </Badge>
+            )}
           </div>
 
           <dl className="grid grid-cols-2 gap-4">

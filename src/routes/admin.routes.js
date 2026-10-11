@@ -10,6 +10,7 @@ import { getCacheStats } from "../services/cache.service.js";
 import { getState as getCircuitState } from "../services/circuitBreaker.service.js";
 import { getTokensUsedToday } from "../services/rateLimit.service.js";
 import { createApiKey } from "../services/apiKey.service.js";
+import { PII_TYPES } from "../config/piiTypes.js";
 
 const router = Router();
 router.use(adminAuth);
@@ -47,6 +48,8 @@ router.get("/v1/admin/overview", async (req, res) => {
         fallbackCount: { $sum: { $cond: ["$fallbackUsed", 1, 0] } },
         judgeCalls: { $sum: { $cond: ["$judgeUsed", 1, 0] } },
         judgeCostUsd: { $sum: "$judgeCostUsd" },
+        piiRedactedTotal: { $sum: "$piiRedacted" },
+        piiBlockedCount: { $sum: { $cond: [{ $eq: ["$status", "blocked"] }, 1, 0] } },
       },
     },
   ]);
@@ -57,6 +60,20 @@ router.get("/v1/admin/overview", async (req, res) => {
     { $match: { createdAt: { $gte: since }, stream: true, ttftMs: { $ne: null } } },
     { $group: { _id: null, avgTtftMs: { $avg: "$ttftMs" } } },
   ]);
+
+  // Breakdown by type for the "Sensitive items protected" KPI - counts
+  // REQUESTS that contained each type (via $unwind), not raw occurrences,
+  // since RequestLog only stores the distinct type list per request, not a
+  // per-type occurrence count.
+  const piiTypeRows = await RequestLog.aggregate([
+    { $match: { createdAt: { $gte: since }, piiTypes: { $exists: true, $ne: [] } } },
+    { $unwind: "$piiTypes" },
+    { $group: { _id: "$piiTypes", count: { $sum: 1 } } },
+  ]);
+  const piiTypeBreakdown = {};
+  for (const row of piiTypeRows) {
+    piiTypeBreakdown[row._id] = row.count;
+  }
 
   const t = totals || {};
   const totalRequests = t.totalRequests || 0;
@@ -75,6 +92,9 @@ router.get("/v1/admin/overview", async (req, res) => {
     fallbackRate: totalRequests ? (t.fallbackCount || 0) / totalRequests : 0,
     judgeCalls: t.judgeCalls || 0,
     judgeCostUsd: t.judgeCostUsd || 0,
+    piiRedactedTotal: t.piiRedactedTotal || 0,
+    piiBlockedCount: t.piiBlockedCount || 0,
+    piiTypeBreakdown,
   });
 });
 
@@ -209,6 +229,9 @@ router.get("/v1/admin/keys", async (req, res) => {
       tokensPerDay: key.tokensPerDay,
       isActive: key.isActive,
       semanticCacheEnabled: key.semanticCacheEnabled,
+      piiMode: key.piiMode,
+      piiTypes: key.piiTypes,
+      restoreInResponse: key.restoreInResponse,
       requestsToday: requestsByKey[String(key._id)] ?? 0,
       tokensToday: await getTokensUsedToday(key._id),
       createdAt: key.createdAt,
@@ -230,7 +253,7 @@ router.get("/v1/admin/keys", async (req, res) => {
 // a password hash can't be reversed back into a password. If it's lost,
 // the only fix is creating a new key (and deactivating/deleting the old one).
 router.post("/v1/admin/keys", async (req, res) => {
-  const { name, requestsPerMinute, tokensPerDay, semanticCacheEnabled } = req.body;
+  const { name, requestsPerMinute, tokensPerDay, semanticCacheEnabled, piiMode, piiTypes, restoreInResponse } = req.body;
 
   if (!name || typeof name !== "string" || !name.trim()) {
     return res.status(400).json({ error: "name is required" });
@@ -246,10 +269,28 @@ router.post("/v1/admin/keys", async (req, res) => {
     limits[field] = num;
   }
 
+  const piiFields = {};
+  if (piiMode !== undefined) {
+    if (!["off", "mask", "block"].includes(piiMode)) {
+      return res.status(400).json({ error: 'piiMode must be "off", "mask", or "block"' });
+    }
+    piiFields.piiMode = piiMode;
+  }
+  if (piiTypes !== undefined) {
+    if (!Array.isArray(piiTypes) || !piiTypes.every((t) => PII_TYPES.includes(t))) {
+      return res.status(400).json({ error: `piiTypes must be an array of: ${PII_TYPES.join(", ")}` });
+    }
+    piiFields.piiTypes = piiTypes;
+  }
+  if (restoreInResponse !== undefined) {
+    piiFields.restoreInResponse = Boolean(restoreInResponse);
+  }
+
   const { key, rawKey } = await createApiKey({
     name: name.trim(),
     ...limits,
     semanticCacheEnabled: Boolean(semanticCacheEnabled),
+    ...piiFields,
   });
 
   res.status(201).json({
@@ -261,6 +302,9 @@ router.post("/v1/admin/keys", async (req, res) => {
     tokensPerDay: key.tokensPerDay,
     isActive: key.isActive,
     semanticCacheEnabled: key.semanticCacheEnabled,
+    piiMode: key.piiMode,
+    piiTypes: key.piiTypes,
+    restoreInResponse: key.restoreInResponse,
     createdAt: key.createdAt,
   });
 });
@@ -278,9 +322,9 @@ router.delete("/v1/admin/keys/:id", async (req, res) => {
   res.json({ id: key._id, deleted: true });
 });
 
-// PATCH /v1/admin/keys/:id - toggle isActive and/or semanticCacheEnabled.
-// Body: { "isActive": true/false, "semanticCacheEnabled": true/false }
-// (either field, or both - anything else is ignored).
+// PATCH /v1/admin/keys/:id - toggle isActive, semanticCacheEnabled, and/or
+// the PII settings (piiMode, piiTypes, restoreInResponse). Body: any subset
+// of those fields - anything else is ignored.
 router.patch("/v1/admin/keys/:id", async (req, res) => {
   const updates = {};
   if (typeof req.body.isActive === "boolean") {
@@ -289,9 +333,24 @@ router.patch("/v1/admin/keys/:id", async (req, res) => {
   if (typeof req.body.semanticCacheEnabled === "boolean") {
     updates.semanticCacheEnabled = req.body.semanticCacheEnabled;
   }
+  if (req.body.piiMode !== undefined) {
+    if (!["off", "mask", "block"].includes(req.body.piiMode)) {
+      return res.status(400).json({ error: 'piiMode must be "off", "mask", or "block"' });
+    }
+    updates.piiMode = req.body.piiMode;
+  }
+  if (req.body.piiTypes !== undefined) {
+    if (!Array.isArray(req.body.piiTypes) || !req.body.piiTypes.every((t) => PII_TYPES.includes(t))) {
+      return res.status(400).json({ error: `piiTypes must be an array of: ${PII_TYPES.join(", ")}` });
+    }
+    updates.piiTypes = req.body.piiTypes;
+  }
+  if (typeof req.body.restoreInResponse === "boolean") {
+    updates.restoreInResponse = req.body.restoreInResponse;
+  }
 
   if (Object.keys(updates).length === 0) {
-    return res.status(400).json({ error: "Provide isActive and/or semanticCacheEnabled as booleans" });
+    return res.status(400).json({ error: "Provide isActive, semanticCacheEnabled, piiMode, piiTypes, and/or restoreInResponse" });
   }
 
   const key = await ApiKey.findByIdAndUpdate(req.params.id, updates, { new: true });
@@ -304,6 +363,9 @@ router.patch("/v1/admin/keys/:id", async (req, res) => {
     name: key.name,
     isActive: key.isActive,
     semanticCacheEnabled: key.semanticCacheEnabled,
+    piiMode: key.piiMode,
+    piiTypes: key.piiTypes,
+    restoreInResponse: key.restoreInResponse,
   });
 });
 

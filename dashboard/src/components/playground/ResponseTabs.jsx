@@ -11,6 +11,8 @@ const HIGHLIGHT_HEADERS = [
   "x-cache",
   "x-provider",
   "x-semantic-cache",
+  "x-pii-mode",
+  "x-pii-redacted",
   "x-ratelimit-limit",
   "x-ratelimit-remaining",
   "retry-after",
@@ -155,6 +157,9 @@ const METADATA_FIELDS = [
   ["costSavedUsd", "Cost saved (USD)"],
   ["ttftMs", "TTFT (ms)"],
   ["latencyMs", "Latency (ms, server-reported)"],
+  ["piiRedacted", "PII values redacted"],
+  ["piiTypes", "PII types"],
+  ["maskedPrompt", "Prompt sent to provider (masked)"],
   ["requestId", "Request ID"],
 ];
 

@@ -30,6 +30,7 @@ import {
   recordMiss,
   recordSemanticSkippedOptOut,
 } from "../services/cache.service.js";
+import { createRedactionSession, restore, createStreamRestorer } from "../services/pii/redactor.js";
 
 const router = Router();
 
@@ -63,6 +64,14 @@ function semanticCacheHeaderValue(apiKey) {
   return env.SEMANTIC_CACHE_ENABLED && apiKey.semanticCacheEnabled ? "enabled" : "disabled";
 }
 
+// Same reasoning as semanticCacheHeaderValue() above, for PII redaction:
+// a pure key-setting readout ("off"/"mask"/"block"), sent on every response
+// so Playground's Advanced Options can show it without needing admin
+// access to GET /v1/admin/keys.
+function piiModeHeaderValue(apiKey) {
+  return apiKey.piiMode;
+}
+
 // A messages array with prior turns means this request depends on
 // conversation context that the exact/semantic caches know nothing about -
 // a cached answer to "and what about Tuesday?" from a DIFFERENT conversation
@@ -71,6 +80,36 @@ function semanticCacheHeaderValue(apiKey) {
 // if/when one is added.
 function hasConversationHistory(req) {
   return Array.isArray(req.body.messages) && req.body.messages.length > 1;
+}
+
+// --- PII redaction helpers ----------------------------------------------
+// See src/services/pii/redactor.js and docs/pii-redaction.md for the full
+// design. Short version: one `session` per request masks both the prompt
+// (before it leaves the gateway) and, on a fresh provider answer, the
+// response too - the same session so a value echoed in both reuses the
+// same placeholder. `session` is null when piiMode is "off", so every call
+// site below that reads `session?.something` behaves exactly as it did
+// before this feature existed.
+
+function piiCount(counts) {
+  return Object.values(counts).reduce((sum, n) => sum + n, 0);
+}
+
+function piiTypesOf(counts) {
+  return Object.keys(counts);
+}
+
+// Runs redaction on the incoming prompt. Returns null (no further action)
+// when the key's piiMode is "off". Otherwise returns a descriptor the
+// caller uses to either reject the request (block mode, something found)
+// or carry on with `maskedPrompt` instead of the real prompt.
+function preparePii(apiKey, prompt) {
+  if (apiKey.piiMode === "off") {
+    return null;
+  }
+  const session = createRedactionSession(apiKey.piiTypes);
+  const maskedPrompt = session.mask(prompt);
+  return { session, maskedPrompt };
 }
 
 // Looks for a semantic cache match for `prompt` under `model`. Computes the
@@ -133,6 +172,13 @@ async function lookupSemanticCache(model, prompt, bypassCache, semanticCacheActi
 // the response + usage + cost. Protected: requires a valid API key and
 // respects its rate limits.
 //
+// Pipeline order: auth -> rate limit -> PII redaction -> exact cache ->
+// semantic cache -> providers -> restore -> response (see
+// docs/pii-redaction.md). PII redaction runs before either cache so cache
+// keys, embeddings, and stored cache entries only ever see the MASKED
+// prompt/answer - never the real values (see preparePii() above and
+// cacheData.text below).
+//
 // Cache lookup order: exact match -> semantic (similar-meaning) match ->
 // providers. Exact comes first because it's a single cheap Redis GET with
 // zero chance of a wrong answer; semantic needs an embedding call and a
@@ -166,17 +212,47 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
   // handleStreamingChat, so "X-Request-Id" really is that log entry's id.
   const requestId = new Types.ObjectId();
   res.set("X-Semantic-Cache", semanticCacheHeaderValue(req.apiKey));
+  res.set("X-PII-Mode", piiModeHeaderValue(req.apiKey));
   res.set("X-Request-Id", String(requestId));
 
+  // --- PII redaction (before anything else touches the prompt) ---
+  const pii = preparePii(req.apiKey, prompt);
+  const maskedPrompt = pii ? pii.maskedPrompt : prompt;
+
+  if (req.apiKey.piiMode === "block" && pii && piiCount(pii.session.counts) > 0) {
+    const types = piiTypesOf(pii.session.counts);
+    const count = piiCount(pii.session.counts);
+    res.set("X-PII-Redacted", String(count));
+
+    await RequestLog.create({
+      _id: requestId,
+      apiKeyId: req.apiKey._id,
+      provider: "none",
+      model: "none",
+      prompt: maskedPrompt,
+      latencyMs: 0,
+      status: "blocked",
+      piiRedacted: count,
+      piiTypes: types,
+    });
+
+    return res.status(422).json({
+      error: "Prompt contains sensitive data",
+      types,
+      requestId: String(requestId),
+    });
+  }
+
   if (stream === true) {
-    return handleStreamingChat(req, res, prompt, requestId);
+    return handleStreamingChat(req, res, maskedPrompt, pii, requestId);
   }
 
   const bypassCache = req.headers["x-cache-bypass"] === "true";
-  const cacheKey = buildCacheKey(getPrimaryModel(), prompt);
+  const cacheKey = buildCacheKey(getPrimaryModel(), maskedPrompt);
   const primaryModel = getPrimaryModel();
   const primaryProvider = getPrimaryProvider();
   const startTime = Date.now();
+  const restoreInResponse = req.apiKey.restoreInResponse;
 
   // --- Exact cache ---
   if (!bypassCache) {
@@ -189,13 +265,22 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       const costSavedUsd = calculateCost(cached.model, cached.inputTokens, cached.outputTokens);
 
       const fallbackUsed = cached.provider !== primaryProvider;
+      // `cached.text` is already masked (every cache entry is written
+      // masked whenever its writer's piiMode wasn't "off" - see the miss
+      // branch below). Restored here using THIS request's own session, not
+      // whatever session (if any) originally wrote the entry - see
+      // redactor.js's top comment for why that matters.
+      const clientText = pii && restoreInResponse ? restore(cached.text, pii.session.mapping) : cached.text;
+      const piiRedacted = pii ? piiCount(pii.session.counts) : 0;
+      const piiTypes = pii ? piiTypesOf(pii.session.counts) : [];
+      if (pii) res.set("X-PII-Redacted", String(piiRedacted));
 
       await RequestLog.create({
         _id: requestId,
         apiKeyId: req.apiKey._id,
         provider: cached.provider,
         model: cached.model,
-        prompt,
+        prompt: maskedPrompt,
         response: cached.text,
         inputTokens: 0,
         outputTokens: 0,
@@ -208,12 +293,14 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
         costUsd: 0,
         costSavedUsd,
         fallbackUsed,
+        piiRedacted,
+        piiTypes,
       });
 
       res.set("X-Cache", "HIT-EXACT");
       res.set("X-Provider", cached.provider);
       return res.json({
-        response: cached.text,
+        response: clientText,
         usage: {
           inputTokens: cached.inputTokens,
           outputTokens: cached.outputTokens,
@@ -229,6 +316,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
         costUsd: 0,
         costSavedUsd,
         requestId: String(requestId),
+        ...(pii ? { maskedPrompt, piiRedacted, piiTypes } : {}),
       });
     }
   }
@@ -243,7 +331,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
   const { embedding, match, verdict } = await lookupSemanticCache(
     primaryModel,
-    prompt,
+    maskedPrompt,
     bypassCache,
     semanticCacheActive
   );
@@ -255,13 +343,17 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
     const costSavedUsd = calculateCost(match.data.model, match.data.inputTokens, match.data.outputTokens);
 
     const fallbackUsed = match.data.provider !== primaryProvider;
+    const clientText = pii && restoreInResponse ? restore(match.data.text, pii.session.mapping) : match.data.text;
+    const piiRedacted = pii ? piiCount(pii.session.counts) : 0;
+    const piiTypes = pii ? piiTypesOf(pii.session.counts) : [];
+    if (pii) res.set("X-PII-Redacted", String(piiRedacted));
 
     await RequestLog.create({
       _id: requestId,
       apiKeyId: req.apiKey._id,
       provider: match.data.provider,
       model: match.data.model,
-      prompt,
+      prompt: maskedPrompt,
       response: match.data.text,
       inputTokens: 0,
       outputTokens: 0,
@@ -277,12 +369,14 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       costUsd: 0,
       costSavedUsd,
       fallbackUsed,
+      piiRedacted,
+      piiTypes,
     });
 
     res.set("X-Cache", "HIT-SEMANTIC");
     res.set("X-Provider", match.data.provider);
     return res.json({
-      response: match.data.text,
+      response: clientText,
       usage: {
         inputTokens: match.data.inputTokens,
         outputTokens: match.data.outputTokens,
@@ -301,12 +395,13 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       costUsd: 0,
       costSavedUsd,
       requestId: String(requestId),
+      ...(pii ? { maskedPrompt, piiRedacted, piiTypes } : {}),
     });
   }
 
   // --- Full miss: ask a provider, then save to both caches ---
   try {
-    const result = await askWithFallback(prompt);
+    const result = await askWithFallback(maskedPrompt);
     const latencyMs = Date.now() - startTime;
     const totalTokens = result.inputTokens + result.outputTokens;
     const costUsd = calculateCost(result.model, result.inputTokens, result.outputTokens);
@@ -314,8 +409,19 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
     await addTokenUsage(req.apiKey._id, totalTokens);
 
+    // The provider only ever saw maskedPrompt, so result.text is already
+    // built from masked input - but the model can still echo real-looking
+    // values of its own (an example card number, say), so the answer gets
+    // its own redaction pass too, sharing `pii.session` so a value already
+    // masked in the prompt reuses the same placeholder if echoed back.
+    const maskedAnswer = pii ? pii.session.mask(result.text) : result.text;
+    const clientText = pii && restoreInResponse ? restore(maskedAnswer, pii.session.mapping) : maskedAnswer;
+    const piiRedacted = pii ? piiCount(pii.session.counts) : 0;
+    const piiTypes = pii ? piiTypesOf(pii.session.counts) : [];
+    if (pii) res.set("X-PII-Redacted", String(piiRedacted));
+
     const cacheData = {
-      text: result.text,
+      text: maskedAnswer,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       model: result.model,
@@ -324,7 +430,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
     await setCached(cacheKey, cacheData);
     if (embedding) {
-      await storeSemanticCache(primaryModel, prompt, embedding, cacheData);
+      await storeSemanticCache(primaryModel, maskedPrompt, embedding, cacheData);
     }
 
     if (!bypassCache) {
@@ -336,8 +442,8 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       apiKeyId: req.apiKey._id,
       provider: result.provider,
       model: result.model,
-      prompt,
-      response: result.text,
+      prompt: maskedPrompt,
+      response: maskedAnswer,
       inputTokens: result.inputTokens,
       outputTokens: result.outputTokens,
       totalTokens,
@@ -350,12 +456,14 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       costSavedUsd: 0,
       fallbackUsed,
       attempts: result.attempts,
+      piiRedacted,
+      piiTypes,
     });
 
     res.set("X-Cache", bypassCache ? "BYPASS" : "MISS");
     res.set("X-Provider", result.provider);
     res.json({
-      response: result.text,
+      response: clientText,
       usage: {
         inputTokens: result.inputTokens,
         outputTokens: result.outputTokens,
@@ -371,6 +479,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       ...(verdict ? { verifierResult: verdict.reason } : {}),
       costUsd,
       requestId: String(requestId),
+      ...(pii ? { maskedPrompt, piiRedacted, piiTypes } : {}),
     });
   } catch (error) {
     const latencyMs = Date.now() - startTime;
@@ -381,7 +490,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       apiKeyId: req.apiKey._id,
       provider: "none",
       model: "none",
-      prompt,
+      prompt: maskedPrompt,
       latencyMs,
       status: "error",
       errorMessage: error.message,
@@ -404,12 +513,31 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 // lookup order and the exact/semantic/none bookkeeping mirror the
 // non-streaming handler above - only HOW the cached answer is delivered
 // (streamed in small chunks instead of one JSON blob) differs.
-async function handleStreamingChat(req, res, prompt, requestId) {
+//
+// `maskedPrompt` and `pii` (null if piiMode is "off") are already computed
+// by the caller - PII redaction and the block-mode check both have to
+// happen before we even decide whether to open an SSE stream.
+async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
   const bypassCache = req.headers["x-cache-bypass"] === "true";
-  const cacheKey = buildCacheKey(getPrimaryModel(), prompt);
+  const cacheKey = buildCacheKey(getPrimaryModel(), maskedPrompt);
   const primaryModel = getPrimaryModel();
   const primaryProvider = getPrimaryProvider();
   const startTime = Date.now();
+  const restoreInResponse = req.apiKey.restoreInResponse;
+
+  // Only needed when there's something in the mapping to restore AND the
+  // key wants it restored - otherwise every delta is forwarded exactly as
+  // before this feature existed, with no buffering at all.
+  const needsStreamRestore = Boolean(pii) && restoreInResponse && Object.keys(pii.session.mapping).length > 0;
+
+  // Has to be set with res.set() BEFORE writeHead() below - writeHead flushes
+  // headers immediately, so anything set after it is silently dropped. This
+  // only reflects what the PROMPT masked (the answer hasn't been scanned
+  // yet); the final "done" event's piiRedacted is the authoritative total
+  // once the answer has been masked too - see docs/pii-redaction.md.
+  if (pii) {
+    res.set("X-PII-Redacted", String(piiCount(pii.session.counts)));
+  }
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
@@ -439,19 +567,32 @@ async function handleStreamingChat(req, res, prompt, requestId) {
 
   // Replays cached text (from either cache) as small paced chunks instead
   // of dumping it all at once, and logs/responds identically either way.
+  // `data.text` is already masked (see the miss branch below) - any
+  // placeholder it contains is restored for THIS caller via `pii.session`,
+  // never whatever session (if any) originally wrote the cache entry.
   async function streamCachedAnswer(data, cacheType, similarity, matchedPrompt, verdict) {
     const CHUNK_SIZE = 20;
+    const restorer = needsStreamRestore ? createStreamRestorer(pii.session.mapping) : null;
+
     for (let i = 0; i < data.text.length; i += CHUNK_SIZE) {
       if (clientDisconnected) break;
       if (ttftMs === null) ttftMs = Date.now() - startTime;
-      sendEvent({ delta: data.text.slice(i, i + CHUNK_SIZE) });
+      const rawChunk = data.text.slice(i, i + CHUNK_SIZE);
+      const toSend = restorer ? restorer.process(rawChunk) : rawChunk;
+      if (toSend) sendEvent({ delta: toSend });
       await sleep(15); // small pacing so it visibly streams instead of dumping instantly
+    }
+    if (restorer && !clientDisconnected) {
+      const tail = restorer.flush();
+      if (tail) sendEvent({ delta: tail });
     }
 
     const latencyMs = Date.now() - startTime;
     const tokensSaved = data.inputTokens + data.outputTokens;
     const costSavedUsd = calculateCost(data.model, data.inputTokens, data.outputTokens);
     const fallbackUsed = data.provider !== primaryProvider;
+    const piiRedacted = pii ? piiCount(pii.session.counts) : 0;
+    const piiTypes = pii ? piiTypesOf(pii.session.counts) : [];
 
     if (!clientDisconnected) {
       sendEvent({
@@ -471,6 +612,7 @@ async function handleStreamingChat(req, res, prompt, requestId) {
         latencyMs,
         ttftMs,
         requestId: String(requestId),
+        ...(pii ? { maskedPrompt, piiRedacted, piiTypes } : {}),
       });
       res.end();
     }
@@ -480,7 +622,7 @@ async function handleStreamingChat(req, res, prompt, requestId) {
       apiKeyId: req.apiKey._id,
       provider: data.provider,
       model: data.model,
-      prompt,
+      prompt: maskedPrompt,
       response: data.text,
       latencyMs,
       status: clientDisconnected ? "cancelled" : "success",
@@ -495,6 +637,8 @@ async function handleStreamingChat(req, res, prompt, requestId) {
       fallbackUsed,
       stream: true,
       ttftMs,
+      piiRedacted,
+      piiTypes,
     });
   }
 
@@ -518,7 +662,7 @@ async function handleStreamingChat(req, res, prompt, requestId) {
 
   const { embedding, match, verdict } = await lookupSemanticCache(
     primaryModel,
-    prompt,
+    maskedPrompt,
     bypassCache,
     semanticCacheActive
   );
@@ -533,14 +677,18 @@ async function handleStreamingChat(req, res, prompt, requestId) {
   // as it goes so a successful stream can still be cached afterward. ---
   let collectedText = "";
   let result;
+  const liveRestorer = needsStreamRestore ? createStreamRestorer(pii.session.mapping) : null;
 
   try {
-    result = await askWithFallbackStream(prompt, {
+    result = await askWithFallbackStream(maskedPrompt, {
       clientSignal: clientAbortController.signal,
       onDelta: (delta) => {
         if (ttftMs === null) ttftMs = Date.now() - startTime;
-        collectedText += delta;
-        if (!clientDisconnected) sendEvent({ delta });
+        collectedText += delta; // raw provider output (built from maskedPrompt) - masked for real below
+        if (!clientDisconnected) {
+          const toSend = liveRestorer ? liveRestorer.process(delta) : delta;
+          if (toSend) sendEvent({ delta: toSend });
+        }
       },
     });
   } catch (error) {
@@ -557,7 +705,7 @@ async function handleStreamingChat(req, res, prompt, requestId) {
       apiKeyId: req.apiKey._id,
       provider: "none",
       model: "none",
-      prompt,
+      prompt: maskedPrompt,
       response: collectedText || undefined,
       latencyMs,
       status,
@@ -570,6 +718,18 @@ async function handleStreamingChat(req, res, prompt, requestId) {
     return;
   }
 
+  // Live streaming only restores known PROMPT placeholders as they arrive
+  // (see liveRestorer above) - it can't also catch brand-new sensitive data
+  // the model invents mid-answer without re-scanning the whole thing, which
+  // isn't practical chunk-by-chunk. The full collected answer gets a real
+  // redaction pass right here, after the stream has fully finished, so
+  // what's cached/logged is masked even though the live chunks weren't
+  // scanned for anything beyond the prompt's own placeholders.
+  if (liveRestorer && !clientDisconnected) {
+    const tail = liveRestorer.flush();
+    if (tail) sendEvent({ delta: tail });
+  }
+
   const latencyMs = Date.now() - startTime;
   const totalTokens = result.inputTokens + result.outputTokens;
   const costUsd = calculateCost(result.model, result.inputTokens, result.outputTokens);
@@ -579,8 +739,12 @@ async function handleStreamingChat(req, res, prompt, requestId) {
   // charge for it and cache it even if the client left just before this point.
   await addTokenUsage(req.apiKey._id, totalTokens);
 
+  const maskedAnswer = pii ? pii.session.mask(collectedText) : collectedText;
+  const piiRedacted = pii ? piiCount(pii.session.counts) : 0;
+  const piiTypes = pii ? piiTypesOf(pii.session.counts) : [];
+
   const cacheData = {
-    text: result.text,
+    text: maskedAnswer,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
     model: result.model,
@@ -589,7 +753,7 @@ async function handleStreamingChat(req, res, prompt, requestId) {
 
   await setCached(cacheKey, cacheData);
   if (embedding) {
-    await storeSemanticCache(primaryModel, prompt, embedding, cacheData);
+    await storeSemanticCache(primaryModel, maskedPrompt, embedding, cacheData);
   }
 
   if (!bypassCache) {
@@ -615,6 +779,7 @@ async function handleStreamingChat(req, res, prompt, requestId) {
       latencyMs,
       ttftMs,
       requestId: String(requestId),
+      ...(pii ? { maskedPrompt, piiRedacted, piiTypes } : {}),
     });
     res.end();
   }
@@ -624,8 +789,8 @@ async function handleStreamingChat(req, res, prompt, requestId) {
     apiKeyId: req.apiKey._id,
     provider: result.provider,
     model: result.model,
-    prompt,
-    response: result.text,
+    prompt: maskedPrompt,
+    response: maskedAnswer,
     inputTokens: result.inputTokens,
     outputTokens: result.outputTokens,
     totalTokens,
@@ -639,6 +804,8 @@ async function handleStreamingChat(req, res, prompt, requestId) {
     attempts: result.attempts,
     stream: true,
     ttftMs,
+    piiRedacted,
+    piiTypes,
   });
 }
 

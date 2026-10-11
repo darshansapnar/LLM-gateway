@@ -10,6 +10,7 @@ import RequestFlow from "./pages/RequestFlow.jsx";
 import Playground from "./pages/Playground.jsx";
 import { useTheme } from "./hooks/useTheme.js";
 import { useRoute } from "./hooks/useRoute.js";
+import { PlaygroundProvider } from "./store/PlaygroundStore.jsx";
 
 const PAGES = {
   Overview,
@@ -50,27 +51,34 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen bg-bg">
-      <Sidebar
-        activeTab={activeTab}
-        onSelect={navigate}
-        theme={theme}
-        onToggleTheme={toggleTheme}
-        onLogout={() => setAdminKey(null)}
-        mobileOpen={mobileNavOpen}
-        onCloseMobile={() => setMobileNavOpen(false)}
-      />
-
-      <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8">
-        <ActivePage
-          adminKey={adminKey}
-          onOpenMobileNav={() => setMobileNavOpen(true)}
-          onNavigate={navigate}
-          onUseKeyInPlayground={handleUseKeyInPlayground}
-          playgroundPrefillKey={playgroundPrefillKey}
-          onPrefillConsumed={() => setPlaygroundPrefillKey(null)}
+    // PlaygroundProvider is mounted here - above ActivePage, alongside
+    // Sidebar - specifically so it's never unmounted when `activeTab`
+    // switches away from Playground. See store/PlaygroundStore.jsx's top
+    // comment for why that's what fixes "Playground state resets when I
+    // navigate away and back".
+    <PlaygroundProvider>
+      <div className="flex min-h-screen bg-bg">
+        <Sidebar
+          activeTab={activeTab}
+          onSelect={navigate}
+          theme={theme}
+          onToggleTheme={toggleTheme}
+          onLogout={() => setAdminKey(null)}
+          mobileOpen={mobileNavOpen}
+          onCloseMobile={() => setMobileNavOpen(false)}
         />
-      </main>
-    </div>
+
+        <main className="min-w-0 flex-1 px-4 py-5 sm:px-6 lg:px-8">
+          <ActivePage
+            adminKey={adminKey}
+            onOpenMobileNav={() => setMobileNavOpen(true)}
+            onNavigate={navigate}
+            onUseKeyInPlayground={handleUseKeyInPlayground}
+            playgroundPrefillKey={playgroundPrefillKey}
+            onPrefillConsumed={() => setPlaygroundPrefillKey(null)}
+          />
+        </main>
+      </div>
+    </PlaygroundProvider>
   );
 }

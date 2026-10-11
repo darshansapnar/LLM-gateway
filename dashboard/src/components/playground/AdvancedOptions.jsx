@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, Info } from "lucide-react";
+import { ChevronDown, Info, Settings2 } from "lucide-react";
 
 const STATUS_META = {
   enabled: { label: "Semantic cache: enabled for this key", tone: "text-good-ink" },
@@ -7,15 +7,34 @@ const STATUS_META = {
   unknown: { label: "Semantic cache: unknown — send a request to detect", tone: "text-ink-muted" },
 };
 
-// Stream and bypass are real per-request toggles; semantic caching is
-// deliberately NOT one here - it's controlled by the API key and global
-// config (see CLAUDE.md's semantic caching section), so this only reports
-// its current status (read from the X-Semantic-Cache response header of
-// the last request) rather than offering a checkbox that would lie about
-// how the setting actually works.
-export default function AdvancedOptions({ stream, onChangeStream, bypass, onChangeBypass, semanticCacheStatus }) {
+// Mirrors STATUS_META above - "off"/"mask"/"block" read straight from the
+// X-PII-Mode response header (see piiModeHeaderValue() in chat.routes.js).
+const PII_STATUS_META = {
+  mask: { label: "PII redaction: mask — sensitive values detected & replaced", tone: "text-good-ink" },
+  block: { label: "PII redaction: block — sensitive prompts are rejected (422)", tone: "text-accent" },
+  off: { label: "PII redaction: off for this key", tone: "text-ink-muted" },
+  unknown: { label: "PII redaction: unknown — send a request to detect", tone: "text-ink-muted" },
+};
+
+// Stream and bypass are real per-request toggles; semantic caching and PII
+// redaction are deliberately NOT ones here - both are controlled by the API
+// key (and, for semantic caching, global config too - see CLAUDE.md), so
+// this only reports their current status (read from the X-Semantic-Cache /
+// X-PII-Mode response headers of the last request) rather than offering
+// checkboxes that would lie about how the settings actually work. The "Edit
+// in API Keys" button is the actual way to change either one.
+export default function AdvancedOptions({
+  stream,
+  onChangeStream,
+  bypass,
+  onChangeBypass,
+  semanticCacheStatus,
+  piiModeStatus,
+  onEditPiiSettings,
+}) {
   const [open, setOpen] = useState(false);
   const meta = STATUS_META[semanticCacheStatus] || STATUS_META.unknown;
+  const piiMeta = PII_STATUS_META[piiModeStatus] || PII_STATUS_META.unknown;
 
   return (
     <div className="rounded-lg border border-line">
@@ -54,6 +73,26 @@ export default function AdvancedOptions({ stream, onChangeStream, bypass, onChan
             <div className="mt-1 flex items-start gap-1 text-ink-muted">
               <Info size={11} className="mt-0.5 shrink-0" />
               Semantic caching is controlled by the API key and global config, not per request. Change this in API Keys.
+            </div>
+          </div>
+
+          <div className="rounded-md bg-surface-2 px-2.5 py-2 text-xs">
+            <div className="flex items-center justify-between gap-2">
+              <div className={`font-medium ${piiMeta.tone}`}>{piiMeta.label}</div>
+              {onEditPiiSettings && (
+                <button
+                  type="button"
+                  onClick={onEditPiiSettings}
+                  className="inline-flex shrink-0 items-center gap-1 rounded-md border border-line bg-surface px-2 py-1 text-xs font-medium text-ink-soft hover:bg-surface-2"
+                >
+                  <Settings2 size={11} />
+                  Edit in API Keys
+                </button>
+              )}
+            </div>
+            <div className="mt-1 flex items-start gap-1 text-ink-muted">
+              <Info size={11} className="mt-0.5 shrink-0" />
+              PII redaction is controlled by the API key, not per request.
             </div>
           </div>
         </div>

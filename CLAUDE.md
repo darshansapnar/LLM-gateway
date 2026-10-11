@@ -23,7 +23,7 @@ Node.js + Express (ES modules, async/await), MongoDB (mongoose), Redis (later), 
 - `public/stream-test.html` (served statically via `express.static`) is a minimal manual test page: API key input, prompt textarea, one button, shows live text + final stats JSON.
 
 ## Semantic caching (Stage 6)
-- Lookup order on every `/v1/chat` call (streaming or not): **exact cache → semantic cache → providers**. Exact is a free, zero-risk Redis GET so it's tried first; semantic costs an embedding call and carries a small risk of matching a *different* question, so it only runs after exact has already failed.
+- Lookup order on every `/v1/chat` call (streaming or not): **exact cache → semantic cache → providers**. Exact is a free, zero-risk Redis GET so it's tried first; semantic costs an embedding call and carries a small risk of matching a *different* question, so it only runs after exact has already failed. (Since Stage 8, PII redaction runs even before this: the **full** pipeline is `auth → rate limit → PII redaction → exact cache → semantic cache → providers → restore → response` - see "PII redaction" below. Both caches only ever see the masked text.)
 - `src/services/embedding.service.js`: `embed(text)` calls Gemini's embedding model (`EMBEDDING_MODEL`, default `gemini-embedding-001`, dimension `EMBEDDING_DIM`, default 768) with `taskType: "SEMANTIC_SIMILARITY"` (the task type Google's docs recommend for "do these two texts mean the same thing" comparisons), then L2-normalizes the result before returning it - per Google's docs, only the native 3072-dim output is pre-normalized; any truncated output (our 768) is not, and skipping this step measurably distorted similarity scores (see below). Returns `null` on any failure - callers must treat that as "skip semantic caching," never let it break the actual chat request.
 - `src/services/semanticCache.service.js`: owns a Redis vector index (`idx:cache:sem`, created once at startup by `ensureSemanticIndex()` if `SEMANTIC_CACHE_ENABLED`) over hashes prefixed `cache:sem:`. `findSimilar(model, embedding)` does a KNN-1 search filtered by model (TAG), converts cosine distance to similarity (`1 - distance`), and only returns a match at or above `SIMILARITY_THRESHOLD` (default 0.92). `store(...)` saves a new entry with the same TTL as the exact cache. `clearSemanticCache()` wipes all entries and recreates the index - needed any time the embedding changes shape (model/dimension/task type/normalization); run via `npm run clear-semantic-cache`.
 - The embedding for a given request is computed **once** and reused for both the semantic lookup and (on a full miss) writing the semantic cache entry - never embedded twice for the same request.
@@ -77,6 +77,7 @@ A Postman-style page (`dashboard/src/pages/Playground.jsx`, route `/playground`)
 - "Re-send" in Request History replays the **exact** request object that was actually sent (captured in a snapshot alongside each history entry), not whatever's currently sitting in the editor - `Playground.jsx`'s `performSend()` takes its request as explicit arguments rather than reading component state, specifically so this is correct.
 - A minimal client-side router (`hooks/useRoute.js`) was added so Playground can link to `/request-flow?scenario=<id>` and have that page read it back, and so every page has a real address-bar URL. It's a small fixed path↔tab lookup table plus `history.pushState`/`popstate` - not a routing library; `Sidebar.jsx`'s `onSelect` and every page's new `onNavigate` prop both go through the same `navigate()` function.
 - "Remember key on this device" (unchecked by default, next to the API key field) opts the gateway key into `sessionStorage` instead of in-memory-only state - `hooks/useRememberedApiKey.js`. Session storage, not localStorage: it survives a page refresh but is cleared the moment the tab closes, matching "remember on this device", not "remember forever". Unchecking (or clearing the field) removes the stored copy immediately, not just on the next write. **Scope is deliberately narrow**: this hook is wired up only for the gateway key Playground's `AuthSection.jsx` collects - it is never reused for a provider key (`GROQ_API_KEY`/`GEMINI_API_KEY`/`OPENROUTER_API_KEY`, which the frontend never even receives) or `ADMIN_API_KEY` (Login.jsx keeps that in memory only, with no remember option at all).
+- **State lives in `store/PlaygroundStore.jsx`, not in `Playground.jsx` itself** (fixed after it originally lived in page-local `useState` - navigating to another dashboard tab and back used to reset everything, since `App.jsx` only ever mounts the active page and unmounts the rest). `PlaygroundProvider` wraps the whole app shell in `App.jsx` (alongside `Sidebar`, outside `ActivePage`), so it's never unmounted while logged in; `Playground.jsx` is now a thin view that reads/writes it via `usePlaygroundStore()`. This also means the actual fetch/SSE loop (`performSend`) is owned by the provider, not the page - navigating away mid-stream doesn't abort it or throw a "set state on an unmounted component" warning, since the component whose setters it calls never unmounts; the stream keeps running and Playground shows wherever it got to when you come back. `lib/playground/persistence.js` optionally mirrors the non-secret parts (endpoint, headers, body, stream/bypass flags, a redacted history) into `sessionStorage` so a page *refresh* survives too - explicitly excluding the API key (that's `useRememberedApiKey`'s own separate, already-reviewed storage key) and the last response (may hold PII restored to its real value for this caller - memory only, never written anywhere). History entries persisted this way are stripped down to `{bodyObject, isStream}` - no baked-in `Authorization: Bearer <real key>` - so "Re-send" on a post-refresh entry rebuilds headers fresh from whatever's currently typed in, rather than replaying a frozen real key that was never actually stored. `RequestBar.jsx`'s "Reset" button clears the whole store (form fields, response, history) and wipes the sessionStorage mirror back to defaults - it deliberately leaves the API key alone, which has its own clear path (empty the field, or uncheck "remember").
 
 ## API key creation from the dashboard (Stage 7, Part 5)
 - `src/services/apiKey.service.js` is the single place that generates and hashes gateway API keys - `hashKey()` (SHA-256, unchanged) and `createApiKey({ name, requestsPerMinute?, tokensPerDay?, semanticCacheEnabled? })`, which creates the raw key (`gw_` + 32 random hex chars), stores only its hash, and returns `{ key, rawKey }`. Both `scripts/createApiKey.js` (CLI) and the new admin route call this same function, so the two can never drift apart. Optional fields are only passed through to `ApiKey.create()` when actually provided, so the schema's own defaults (20/min, 50000/day, semantic caching off) still apply when the CLI is run without them - exactly as before the refactor.
@@ -88,6 +89,23 @@ A Postman-style page (`dashboard/src/pages/Playground.jsx`, route `/playground`)
 - Dashboard: API Keys page gets a "Create API key" button (`ApiKeysPage.jsx`) that opens `pages/apikeys/CreateKeyDialog.jsx`, a two-step dialog built on the new reusable `components/common/Modal.jsx` (centered dialog, Escape/backdrop/X to close - distinct from `RequestDetailPanel.jsx`'s slide-over). Step 1 is the form (name, requests/min default 20, tokens/day default 50000, semantic cache checkbox) with the same validation as the backend. Step 2 (shown after a successful create) displays the raw key in a highlighted box with a Copy button (`navigator.clipboard`) and a "shown only once" warning - the raw key lives only in this dialog's local state, so closing it discards the key from the dashboard too, same as the server never being able to show it again.
 - The table gets a delete icon per row (`window.confirm` before calling the new `deleteKey()` API function, then reloads), consistent with the codebase's existing lightweight `alert()`/`confirm()` usage rather than a custom confirmation modal.
 - "Use in Playground" (optional button in the create dialog's success step) hands the freshly-created key to the Playground page **without ever touching the URL or any storage**: `App.jsx` holds a one-shot `playgroundPrefillKey` state, set when the button is clicked and navigated to, read once by `Playground.jsx` in a mount-only `useEffect` (which immediately clears it via `onPrefillConsumed`) so revisiting the Playground tab later doesn't silently re-inject a stale key.
+
+## PII redaction (Stage 8)
+Full writeup: `docs/pii-redaction.md`. Short version:
+
+- Pipeline order: `auth → rate limit → PII redaction → exact cache → semantic cache → providers → restore → response` - redaction runs before either cache so cache keys/entries only ever see masked text, never real values.
+- `src/services/pii/detectors.js` - regex + checksum (Luhn for `CARD`, Verhoeff for `AADHAAR`) detection for six structured types: `EMAIL`, `PHONE_IN` (Indian mobiles), `CARD`, `AADHAAR`, `PAN`, `SECRET` (provider key prefixes / `key=value` assignments). Deterministic, no threshold to tune (unlike the semantic cache's embeddings) - overlapping matches resolve by priority (`CARD > AADHAAR > PAN > SECRET > EMAIL > PHONE_IN`).
+- `src/services/pii/redactor.js` - `createRedactionSession(piiTypes)` masks a prompt/answer into `[EMAIL_1]`-style placeholders (the same real value reuses the same placeholder across prompt and answer), `restore()` reverses it using **that request's own session only** (a cache hit never restores using whoever originally wrote the cache entry), `createStreamRestorer()` buffers a placeholder split across SSE chunk boundaries. The mapping lives in memory for one request only - never persisted.
+- Per-key settings on `ApiKey`: `piiMode` (`"mask"` default / `"block"` / `"off"`), `piiTypes` (which of the six types, default all), `restoreInResponse` (default `true` - caller gets real values back, or raw placeholders if off). Unlike semantic caching, masking is **on by default** - it carries no correctness risk, so there's no reason to opt in. **No new `.env` variables** - unlike semantic caching's `SEMANTIC_CACHE_ENABLED`, there's no global PII on/off switch; it's entirely per-key, set from the dashboard (`POST`/`PATCH /v1/admin/keys`) or `createApiKey()`.
+- `piiMode: "block"` rejects the request with `422` (`{ error, types, requestId }`) **before** either cache or any provider is touched; `RequestLog.status` gets a new `"blocked"` value, with `prompt` set to the masked text (never the real one).
+- `RequestLog` gained `piiRedacted` (occurrence count) and `piiTypes` (distinct types involved) - `prompt`/`response` always hold masked text whenever `piiMode` isn't `"off"`.
+- `GET /v1/admin/overview` adds `piiRedactedTotal`, `piiBlockedCount`, `piiTypeBreakdown` (per-type request counts). `POST`/`PATCH /v1/admin/keys` validate and persist all three PII fields; `GET /v1/admin/keys` returns them.
+- `X-PII-Redacted` response header (also in `app.js`'s CORS `exposedHeaders`, same reasoning as the other custom headers Playground reads) - for streaming it's set from the prompt-only count **before** `res.writeHead()` flushes headers (has to be set before that point or it's silently dropped - this was a real bug, since fixed). `X-PII-Mode` (`"off"`/`"mask"`/`"block"`) is also always sent - a pure key-setting readout, same idea as `X-Semantic-Cache`, so a caller can tell what's configured without needing admin access.
+- Dashboard: API Keys' create dialog and a per-row "Edit PII settings" dialog (`dashboard/src/pages/apikeys/EditPiiDialog.jsx`) cover `piiMode`/`piiTypes`/`restoreInResponse`; Overview gets a "Sensitive items protected" KPI with a per-type breakdown + blocked count; Requests page/detail panel show a "N redacted (TYPES)" badge and the new `"blocked"` status (never real values - `log.prompt`/`log.response` are already masked); Playground's `PiiBanner.jsx` handles the 422 block response, shows the `X-PII-Redacted` count, and a "Sent to provider" view of `maskedPrompt`; Playground's Advanced Options also shows a read-only `X-PII-Mode` readout (mirrors the existing semantic-cache-status readout - deliberately not a checkbox, since it's a per-key setting) with an "Edit in API Keys" button that navigates there via the existing `useRoute` router - no admin key is ever given to the Playground page itself.
+- `npm run eval-pii` (`scripts/evalPii.js` + `scripts/piiEvalSet.json`, 40 cases) reports precision/recall per type. Includes tricky non-PII negatives a naive regex would get wrong: order IDs/random numbers that fail Luhn, 12-digit numbers that fail Verhoeff (or start with 0/1), dates, prices, a phone-shaped number with the wrong leading digit. Latest run: **100% precision and recall on all 6 types** - unlike the semantic cache eval, there's no threshold to tune since this pipeline is deterministic.
+- Known limitations: no names/addresses (structured types only, not an NER model), Indian phone numbers only, and live streaming can only restore already-known prompt placeholders (not brand-new sensitive text the model invents mid-answer - that's only caught once the full answer is scanned after the stream ends).
+- Tests: `tests/pii.unit.test.js` (checksums, each detector, overlap priority, redactor - no DB/network) and `tests/pii.route.test.js` (real Mongo + Redis, mocked providers - mask mode, block mode, cache/log leakage, a provider error, streaming split-placeholder restoration).
+- CLI key creation (`scripts/createApiKey.js`) does **not** have PII flags yet - keys with non-default PII settings are created from the dashboard.
 
 ## Docker (Stage 7, Part 2)
 Packaging only - one exception: Docker surfaced a real, pre-existing bug in `ensureSemanticIndex()` (see below), which got fixed along with everything else here.
@@ -125,6 +143,17 @@ Packaging only - one exception: Docker surfaced a real, pre-existing bug in `ens
 - [x] Stage 7, Part 2: Docker Compose (GitHub Actions still pending)
 - [x] Stage 7, Part 3: Request Flow page (simulated request lifecycle walkthrough)
 - [x] Stage 7, Part 4: Playground page (real requests to the gateway, Postman-style)
+- [x] Stage 8: PII redaction (detect/mask/block sensitive data, per-key settings, dashboard support)
+
+## Remaining work
+Not started yet, roughly in order:
+- [ ] More tests + a GitHub Actions CI workflow to run them on every push/PR (**next**)
+- [ ] A way to simulate a Groq failure on demand (a toggle/flag), to show the fallback-to-Gemini path working live instead of only in the simulated Request Flow page
+- [ ] A k6 load test, to get real numbers on throughput/latency under concurrent load
+- [ ] An actual deploy (currently local/Docker-Compose only)
+- [ ] Fill the README's numbers in with real measurements (latency, cost savings, cache hit rate) instead of leaving them to "see the dashboard"
+- [ ] A short client-facing guide (how to get a key, call `/v1/chat`, read the response) - separate from this file, which is written for working on the gateway itself, not for calling it
+- [ ] A demo video walking through the dashboard + Playground
 
 ## Rules
 - I'm learning: build ONLY the current stage, never jump ahead.
@@ -151,6 +180,8 @@ src/
     pricing.js              - USD price per 1M tokens per model (PLACEHOLDER values - verify before trusting)
     antonyms.js             - word pairs the antonym guard treats as opposite in meaning
     techTerms.js            - programming languages/frameworks/products the entity check always sends to the judge
+    piiTypes.js             - PII_TYPES: the six detectable types, shared by detectors.js and the
+                               ApiKey.piiTypes schema validation
   routes/
     health.routes.js        - GET /health
     chat.routes.js          - POST /v1/chat (auth + rate limit + exact/semantic cache + fallback + streaming)
@@ -180,6 +211,12 @@ src/
                                verification" above); llmJudge caches its decisions in Redis
     apiKey.service.js       - hashKey() + createApiKey(): the one place that generates/hashes gateway
                                API keys, shared by scripts/createApiKey.js and POST /v1/admin/keys
+    pii/
+      detectors.js           - regex + checksum (Luhn/Verhoeff) detection for the six PII types,
+                               detectAll() resolves overlapping matches by priority
+      checksums.js            - luhnValid() (CARD) and verhoeffValid() (AADHAAR)
+      redactor.js              - createRedactionSession() (mask, placeholder reuse), restore(),
+                               createStreamRestorer() (chunk-boundary-safe restoration for SSE)
   models/
     RequestLog.js           - mongoose schema for logged requests (costUsd, costSavedUsd, fallbackUsed,
                                attempts[], stream, ttftMs, cacheType, similarity, matchedPrompt,
@@ -193,19 +230,31 @@ public/
 docs/
   semantic-cache.md         - full semantic caching writeup: opt-in, verification pipeline, eviction,
                                config reference, measured limitations
+  pii-redaction.md          - full PII redaction writeup: pipeline order, detectors, masking/restore,
+                               per-key settings, block mode, eval results, known limitations
 scripts/
   createApiKey.js           - CLI: node scripts/createApiKey.js <name> [--semantic] (or
-                               npm run create-key -- <name> --semantic)
+                               npm run create-key -- <name> --semantic; no PII flags yet - see
+                               "PII redaction" above)
   evalSemanticCache.js      - CLI: npm run eval-cache - tunes a threshold per mode on the tune split,
                                reports accuracy/wrong-hit-rate/judge-calls on the held-out test split
   semanticCacheEvalSet.json - 60 hand-written prompt pairs (paraphrases, antonym negatives,
                                same-template-different-topic negatives), each tagged split: "tune"/"test"
   clearSemanticCache.js     - CLI: npm run clear-semantic-cache - wipes stored vectors + recreates the index
                                (needed after any change to how embeddings are computed)
+  evalPii.js                - CLI: npm run eval-pii - runs piiEvalSet.json through detectAll(),
+                               reports precision/recall/F1 per PII type
+  piiEvalSet.json           - 40 hand-written cases: real-looking fake PII for all six types, plus
+                               tricky non-PII (Luhn/Verhoeff-failing numbers, dates, prices, etc.)
 tests/
   semanticCache.service.test.js - npm test (Node's built-in node:test, no extra dependency): integration
                                test that ensureSemanticIndex() builds the vector index from nothing on an
                                empty Redis and that calling it again is a safe no-op - see "Docker" below
+  pii.unit.test.js          - checksums, each detector, overlap priority, redactor mask/restore/stream-
+                               restorer - no DB or network needed
+  pii.route.test.js         - real /v1/chat pipeline against real Mongo + Redis with providers mocked:
+                               mask mode, block mode, cache/log leakage, provider error, streaming
+                               split-placeholder restoration
 dashboard/                  - separate React + Vite app (own package.json/node_modules), not required for
                                the API to run. Tailwind CSS v4 + lucide-react icons + Recharts, styled as
                                a Stripe/Vercel-like light-first dashboard with an optional dark mode toggle.
@@ -215,10 +264,16 @@ dashboard/                  - separate React + Vite app (own package.json/node_m
                                client-routed path like /playground doesn't 404
   src/
     main.jsx, App.jsx       - entry point; App owns the admin key (in memory only), the active nav tab,
-                               and the mobile sidebar-drawer open/close state
+                               and the mobile sidebar-drawer open/close state; wraps everything in
+                               PlaygroundProvider (store/PlaygroundStore.jsx) so Playground's state
+                               survives switching tabs - see "Playground page" above
     api.js                  - fetch wrapper: base URL from VITE_API_URL, always sends x-admin-key; also
                                has getHealth() (calls the public GET /health, no admin key) for the
                                sidebar's connection dot, and getCacheStats() for the Cache page
+    store/
+      PlaygroundStore.jsx     - PlaygroundProvider + usePlaygroundStore(): Playground's state and
+                               network logic (performSend, history, etc.), mounted once in App.jsx -
+                               see "Playground page" above
     index.css               - Tailwind v4 `@theme` design tokens as real CSS custom properties
                                (--color-bg, --color-surface, --color-accent, --color-series-1..8, etc.);
                                [data-theme="dark"] overrides the same properties, so every Tailwind
@@ -227,8 +282,10 @@ dashboard/                  - separate React + Vite app (own package.json/node_m
     lib/
       format.js              - formatNumber/formatPercent/formatUsd/formatLatency/formatRelativeTime
       chartTheme.js           - shared Recharts colors/tooltip styling (CSS var references)
-      badgeTone.js             - maps backend enums (circuit state, request status, cache type) to a
-                               Badge tone (good/warn/bad/neutral/accent)
+      badgeTone.js             - maps backend enums (circuit state, request status incl. "blocked",
+                               cache type, piiMode) to a Badge tone (good/warn/bad/neutral/accent)
+      piiTypes.js              - PII_TYPES, mirrors src/config/piiTypes.js on the backend (a separate
+                               app, can't import it directly)
     hooks/
       usePolling.js           - fetch now + every 10s; also tracks lastUpdated for the top bar
       useTheme.js              - light/dark toggle, persisted to localStorage, sets <html data-theme>
@@ -257,10 +314,14 @@ dashboard/                  - separate React + Vite app (own package.json/node_m
                                since /v1/admin/providers itself has no time-bucketed latency series)
       CachePage.jsx            - exact/semantic/miss composition, tokens+cost saved, verifier outcome
                                breakdown, judge cost/latency (from GET /v1/admin/cache-stats)
-      ApiKeysPage.jsx          - limits, usage bars, isActive/semanticCacheEnabled toggles, "Create API
-                               key" button, per-row delete action (Stage 7, Part 5)
-        apikeys/CreateKeyDialog.jsx - two-step dialog: create-key form, then the raw key shown once
-                               (Copy button, "Use in Playground") - see Stage 7, Part 5 above
+      ApiKeysPage.jsx          - limits, usage bars, isActive/semanticCacheEnabled toggles, a PII column
+                               (mode badge + per-row "Edit PII settings"), "Create API key" button,
+                               per-row delete action (Stage 7, Part 5 / Stage 8)
+        apikeys/CreateKeyDialog.jsx - two-step dialog: create-key form (incl. piiMode/piiTypes/
+                               restoreInResponse), then the raw key shown once (Copy button, "Use in
+                               Playground") - see Stage 7, Part 5 above
+        apikeys/EditPiiDialog.jsx - small Modal-based dialog (Stage 8) for editing an EXISTING key's
+                               piiMode/piiTypes/restoreInResponse together in one PATCH
       RequestFlow.jsx          - "Request Flow" page (Stage 7, Part 3): an animated, entirely simulated
                                walkthrough of a request's lifecycle through the gateway - mock/scripted
                                data only, makes no backend calls. See below.
@@ -313,6 +374,10 @@ dashboard/                  - separate React + Vite app (own package.json/node_m
                                checklist, built the same evidence-only way as mapScenario.js
       mask.js                   - maskSecret(): masks the gateway API key for display (Headers table,
                                history) - never used for the value actually sent
+      persistence.js            - optional sessionStorage mirror of PlaygroundStore's non-secret state
+                               (endpoint/headers/body/stream/bypass/a redacted history) so a page
+                               refresh survives too - never the API key, never a response (see
+                               "Playground page" above)
     components/playground/
       RequestBar.jsx            - method badge, editable endpoint, Send/Stop (mutually exclusive), Reset
       AuthSection.jsx           - the gateway API key input, masked with a show/hide toggle
@@ -320,12 +385,16 @@ dashboard/                  - separate React + Vite app (own package.json/node_m
                                API key field (masked), swapped for the real key only at send time
       JsonEditor.jsx            - the body textarea with a scroll-synced line-number gutter, Format/Clear
       ExampleChips.jsx          - quick-fill prompts (Normal/Repeat last/Paraphrase/Opposite) for fast demos
-      AdvancedOptions.jsx       - Stream/Bypass checkboxes, plus a read-only semantic-cache-status readout
-                               (from the X-Semantic-Cache header) - deliberately not a checkbox, since
-                               semantic caching is a per-key/global setting, not a per-request one
-      ResponsePanel.jsx, ResponseTabs.jsx - status line + CacheBanner, then Response/Raw/Headers/Metadata
-                               tabs; every field is shown only if the response actually has it
+      AdvancedOptions.jsx       - Stream/Bypass checkboxes, plus read-only semantic-cache and PII-mode
+                               status readouts (from the X-Semantic-Cache / X-PII-Mode headers) -
+                               deliberately not checkboxes, since both are per-key settings, not
+                               per-request ones; PII's readout has an "Edit in API Keys" button
+                               (Stage 8) that navigates there via useRoute - no admin key reaches Playground
+      ResponsePanel.jsx, ResponseTabs.jsx - status line + PiiBanner + CacheBanner, then Response/Raw/
+                               Headers/Metadata tabs; every field is shown only if the response actually has it
       CacheBanner.jsx           - the HIT-EXACT/HIT-SEMANTIC/MISS/BYPASS/rejected-candidate banner
+      PiiBanner.jsx             - (Stage 8) the 422-blocked banner, or an N-redacted banner with a
+                               "Sent to provider" view of maskedPrompt - both straight from response fields
       RequestMetrics.jsx        - a KpiCard grid built only from fields present on the response
       FlowSummary.jsx           - renders buildFlowSummary.js's checklist + "View Full Request Flow ->"
       RequestHistory.jsx        - in-memory list (no backend endpoint); "Re-send" replays the exact
