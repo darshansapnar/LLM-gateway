@@ -1,0 +1,152 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend (Lint & Test)
+    runs-on: ubuntu-latest
+
+    services:
+      mongo:
+        image: mongo:7
+        ports:
+          - 27017:27017
+        options: >-
+          --health-cmd "echo 'db.runCommand(\"ping\").ok' | mongosh --quiet"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+      # Pinned to the same tag docker-compose.yml uses for this service -
+      # not plain redis, since the semantic cache's vector index needs the
+      # RediSearch module that only the Stack image ships.
+      redis:
+        image: redis/redis-stack-server:latest
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      NODE_ENV: test
+      PORT: 3000
+      MONGO_URI: mongodb://localhost:27017/llm-gateway-test
+      # DB 0 - RediSearch (idx:cache:sem) only works on DB 0, so tests can't
+      # use a different logical DB the way the exact/semantic caches might
+      # otherwise be isolated. Test isolation instead comes from flushing
+      # this DB between tests and from unique per-test key names - see
+      # tests/helpers/testDb.js and src/config/env.js's resolveRedisUrl().
+      REDIS_URL: redis://localhost:6379/0
+      ADMIN_API_KEY: ci-test-dummy-admin-key-abcdef1234567890
+      GROQ_API_KEY: gsk_ci_dummy_groq_key_mock_only
+      GROQ_MODEL: openai/gpt-oss-120b
+      GEMINI_API_KEY: ci_dummy_gemini_key_mock_only
+      GEMINI_MODEL: gemini-3.5-flash-lite
+      PROVIDER_ORDER: groq,gemini
+      PROVIDER_TIMEOUT_MS: 15000
+      MAX_RETRIES: 2
+      CACHE_TTL_SECONDS: 86400
+      SEMANTIC_CACHE_ENABLED: "true"
+      SIMILARITY_THRESHOLD: "0.90"
+      SEMANTIC_JUDGE_ENABLED: "true"
+      JUDGE_TIMEOUT_MS: "3000"
+      JUDGE_SKIP_ABOVE: "0.97"
+      EMBEDDING_MODEL: gemini-embedding-001
+      EMBEDDING_DIM: "768"
+      STREAM_IDLE_TIMEOUT_MS: "10000"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Pinned to the Dockerfile's node:22-alpine so CI runs the same major
+      # version the shipped image actually runs.
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Run ESLint
+        run: npm run lint
+
+      - name: Run tests with coverage
+        run: |
+          mkdir -p coverage
+          npm run test:coverage | tee coverage/summary.txt
+
+      - name: Upload Coverage Artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: backend-test-coverage
+          path: coverage/
+          retention-days: 14
+
+  dashboard:
+    name: Dashboard (Build)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: dashboard/package-lock.json
+
+      - name: Install dashboard dependencies
+        run: npm --prefix dashboard ci
+
+      - name: Build dashboard
+        run: npm --prefix dashboard run build
+        env:
+          VITE_API_URL: http://localhost:3000
+
+  docker:
+    name: Docker (Build Verification)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build Backend Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: ./Dockerfile
+          push: false
+
+      - name: Build Dashboard Docker Image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./dashboard
+          file: ./dashboard/Dockerfile
+          push: false
+          build-args: |
+            VITE_API_URL=http://localhost:3000

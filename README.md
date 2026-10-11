@@ -1,5 +1,7 @@
 # LLM Gateway
 
+[![CI](https://github.com/darshansapnar/LLM-gateway/actions/workflows/ci.yml/badge.svg)](https://github.com/darshansapnar/LLM-gateway/actions/workflows/ci.yml)
+
 A middleware server between apps and AI providers (Groq, Gemini). Features:
 
 - Caching (exact-match + semantic/meaning-based, with a verification pipeline to avoid wrong hits)
@@ -74,7 +76,20 @@ npm run docker:down        # stops and removes the containers (data survives in 
 docker compose down -v     # stops AND deletes the mongo/redis volumes - starts fully fresh next time
 ```
 
+## Automated Tests & Linting
+
+The test suite runs with Node's native test runner (`node:test` + `node:assert/strict`) and in-process provider mocks—no live AI API keys are ever required or contacted during testing. Tests run against an isolated test MongoDB database (`llm-gateway-test`) and Redis DB index (`1`).
+
+```bash
+npm run lint              # Run ESLint across src/, tests/, and scripts/
+npm run test:unit         # Run fast unit tests (cache verifier, circuit breaker, retry/backoff, cost, PII)
+npm run test:integration  # Run integration tests (Redis index bootstrap, auth, rate limit, caches, fallback, streaming, admin)
+npm test                  # Run complete test suite (unit + integration + PII route)
+npm run test:coverage     # Run all tests with code coverage report
+```
+
 ## Project structure
 
 See the "Folder structure" section in [`CLAUDE.md`](./CLAUDE.md) for a full file-by-file map of
 `src/`, `dashboard/`, `scripts/`, and the Docker files.
+

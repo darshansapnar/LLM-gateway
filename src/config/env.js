@@ -31,6 +31,38 @@ const requiredVars = [
 ];
 
 // Check that each required variable actually has a value.
+// In test mode, provide dummy defaults so tests can run without live vendor keys.
+if (process.env.NODE_ENV === "test") {
+  process.env.PORT = process.env.PORT || "3000";
+  process.env.ADMIN_API_KEY = process.env.ADMIN_API_KEY || "test-admin-secret-key-12345";
+  process.env.GROQ_API_KEY = process.env.GROQ_API_KEY || "gsk_test_dummy_key";
+  process.env.GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
+  process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "test_dummy_gemini_key";
+  process.env.GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-3.5-flash-lite";
+}
+
+function resolveMongoUri() {
+  if (process.env.NODE_ENV === "test") {
+    if (process.env.MONGO_TEST_URI) return process.env.MONGO_TEST_URI;
+    const uri = process.env.MONGO_URI;
+    if (uri && !uri.includes("-test") && !uri.includes("_test")) {
+      return uri.replace(/\/([^/?]+)(\?|$)/, "/$1-test$2");
+    }
+    return uri || "mongodb://localhost:27017/llm-gateway-test";
+  }
+  return process.env.MONGO_URI;
+}
+
+function resolveRedisUrl() {
+  if (process.env.NODE_ENV === "test") {
+    // RediSearch (the semantic cache's vector index) only works on Redis DB 0,
+    // so tests must stay on DB 0 too - set REDIS_TEST_URL if you want tests to
+    // use a completely separate Redis instance instead.
+    return process.env.REDIS_TEST_URL || process.env.REDIS_URL || "redis://localhost:6379";
+  }
+  return process.env.REDIS_URL;
+}
+
 // We fail fast (exit immediately) instead of letting the app
 // start in a broken state and crash later with a confusing error.
 const missingVars = requiredVars.filter((name) => !process.env[name]);
@@ -48,8 +80,8 @@ if (missingVars.length > 0) {
 // so there is one single, validated source of truth.
 export const env = {
   PORT: process.env.PORT,
-  MONGO_URI: process.env.MONGO_URI,
-  REDIS_URL: process.env.REDIS_URL,
+  MONGO_URI: resolveMongoUri(),
+  REDIS_URL: resolveRedisUrl(),
   // Optional - falls back to 24 hours if not set.
   CACHE_TTL_SECONDS: Number(process.env.CACHE_TTL_SECONDS) || 86400,
   // Provider credentials - each is only actually required when its provider

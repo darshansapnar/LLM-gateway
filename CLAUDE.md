@@ -144,11 +144,11 @@ Packaging only - one exception: Docker surfaced a real, pre-existing bug in `ens
 - [x] Stage 7, Part 3: Request Flow page (simulated request lifecycle walkthrough)
 - [x] Stage 7, Part 4: Playground page (real requests to the gateway, Postman-style)
 - [x] Stage 8: PII redaction (detect/mask/block sensitive data, per-key settings, dashboard support)
+- [x] Stage 9: Automated tests (unit + integration, mocked providers) + GitHub Actions CI
 
 ## Remaining work
 Not started yet, roughly in order:
-- [ ] More tests + a GitHub Actions CI workflow to run them on every push/PR (**next**)
-- [ ] A way to simulate a Groq failure on demand (a toggle/flag), to show the fallback-to-Gemini path working live instead of only in the simulated Request Flow page
+- [ ] A way to simulate a Groq failure on demand (a toggle/flag), to show the fallback-to-Gemini path working live instead of only in the simulated Request Flow page (**next**)
 - [ ] A k6 load test, to get real numbers on throughput/latency under concurrent load
 - [ ] An actual deploy (currently local/Docker-Compose only)
 - [ ] Fill the README's numbers in with real measurements (latency, cost savings, cache hit rate) instead of leaving them to "see the dashboard"
@@ -417,3 +417,59 @@ npm run dev                 # backend, in one terminal
 npm run dev:dashboard       # dashboard, in another terminal - http://localhost:5173
 ```
 Log in with the `ADMIN_API_KEY` value from `.env`. The dashboard calls the backend directly (`VITE_API_URL` in `dashboard/.env`, default `http://localhost:3000`) - CORS on the backend is what allows this cross-origin browser call to succeed. **Open the dashboard at `http://localhost:5173`, not `http://127.0.0.1:5173`** - `DASHBOARD_ORIGIN` is matched by exact origin string, and the two hosts count as different origins even though they resolve to the same machine.
+
+## Automated Tests & GitHub Actions CI (Stage 9)
+Stage 9 establishes an end-to-end automated testing suite and GitHub Actions CI workflow for the entire LLM Gateway.
+
+### Test Runner & Framework
+- Uses Node.js native test runner (`node:test` + `node:assert/strict`), avoiding external test dependencies.
+- Available npm scripts:
+  - `npm run lint`: Runs ESLint across `src/`, `tests/`, and `scripts/`.
+  - `npm run test:unit`: Executes fast, in-memory unit tests in milliseconds (`node --test "tests/unit/**/*.test.js"`).
+  - `npm run test:integration`: Executes end-to-end HTTP integration tests (`node --test --test-concurrency=1 "tests/integration/**/*.test.js" "tests/pii.route.test.js"`).
+  - `npm test`: Runs the full unit + integration test suite.
+  - `npm run test:coverage`: Generates code coverage metrics via Node's `--experimental-test-coverage`.
+
+### Architecture & Isolation
+- **App Separation**: `src/app.js` creates and exports the Express app without listening on a port; `src/index.js` boots listeners and connections. Tests bind to ephemeral ports (`app.listen(0)`).
+- **In-Process Provider Mocks (`tests/helpers/mockProviders.js`)**: All external AI providers (Groq, Gemini, OpenRouter, and Gemini embeddings) are mocked in-process. Tests never contact real vendor APIs or consume API quota. Supports successful answers, HTTP 429/500 failures, simulated timeouts, and SSE streaming chunks.
+- **Database & Cache Isolation (`tests/helpers/testDb.js`)**:
+  - When `NODE_ENV === "test"`, MongoDB connects to an isolated database (`llm-gateway-test`, or `-test` appended to whatever `MONGO_URI` already points at).
+  - Redis stays on **DB 0** in test mode too (`src/config/env.js`'s `resolveRedisUrl()`) - RediSearch (the semantic cache's vector index, `idx:cache:sem`) only works on DB 0, so no test may select a different logical DB (set `REDIS_TEST_URL` instead if you want tests to use a completely separate Redis instance). Isolation between tests comes from `cleanTestDb()`'s `flushdb` in each integration test's `beforeEach`/`afterEach`, plus unique per-test key material (nonces in prompts/key names) where a test shares a file with others that don't flush - not from a second Redis DB.
+  - `cleanTestDb()` wipes test collections and executes `flushdb` between tests.
+
+### Test Coverage Map
+- **Unit Tests (`tests/unit/`)**:
+  - `cacheVerifier.unit.test.js`: Antonym guard dictionary pairs, prefix pairs (`un-`, `dis-`), number difference detection, entity check (proper nouns and tech terms), skip-judge zone (>= 0.97 similarity), LLM judge timeout defaulting to `NO`.
+  - `cacheAndCost.unit.test.js`: Prompt normalization (whitespace trimming, space collapsing, casing preservation), SHA-256 cache key derivation, model cost calculation (`:free` suffix, unconfigured fallbacks).
+  - `circuitBreaker.unit.test.js`: State transitions (`CLOSED` → `OPEN` after 3 consecutive failures → `HALF_OPEN` after 30s cooldown → `CLOSED` or re-trip).
+  - `retryAndRouter.unit.test.js`: Error classification (retries 408/429/5xx, never 400/401/403/404), exponential backoff calculation, failover to secondary provider.
+  - `pii.unit.test.js`: Checksum verification (Luhn, Verhoeff), PII detection patterns (email, phone, card, Aadhaar, PAN, secrets), masking and stream restorer.
+- **Integration Tests (`tests/integration/`)**:
+  - `semanticCacheIndex.integration.test.js`: Vector index bootstrap from an empty Redis instance and idempotency.
+  - `auth.integration.test.js`: Bearer token authentication (missing, malformed, inactive, valid).
+  - `rateLimit.integration.test.js`: Requests per minute and daily token quotas with 429 and `Retry-After`.
+  - `cacheExact.integration.test.js`: `MISS` → `HIT-EXACT` ($0 cost) and `x-cache-bypass: true` → `BYPASS`.
+  - `cacheSemantic.integration.test.js`: Opt-out skip, opt-in paraphrase hit (`HIT-SEMANTIC`), on/off antonym rejection.
+  - `fallback.integration.test.js`: Primary provider failure with automatic failover to secondary, 502 exhaustion with attempt history.
+  - `streaming.integration.test.js`: SSE chunks delivery, `done` event, and streaming cache hits.
+  - `admin.integration.test.js`: `x-admin-key` validation, raw key generation with SHA-256 hashing, key modification and analytics overview.
+  - `pii.route.test.js`: PII masking and blocking across HTTP chat endpoints.
+
+### GitHub Actions CI (`.github/workflows/ci.yml`)
+- Triggers on `push` to `main` and on `pull_request` targeting `main` - not on every branch, so a push to a branch with an open PR doesn't run the workflow twice. A `concurrency` group (keyed by workflow + ref) cancels a still-running run for the same ref when a new one starts, and top-level `permissions: contents: read` keeps the default token scope minimal.
+- **Backend Job**: Spins up `mongo:7` and `redis/redis-stack-server:latest` (pinned to the same tag `docker-compose.yml` uses) service containers with health checks, runs on Node 22 (pinned to match the Dockerfile's `node:22-alpine`), executes `npm ci`, `npm run lint`, then a single `npm run test:coverage` run (no separate plain `npm test` pass - that would just run the same suite twice). Coverage output is piped into `coverage/summary.txt`, uploaded as an artifact with `if: always()` so it's available even if a test fails.
+- **Dashboard Job**: Installs dependencies with `npm --prefix dashboard ci` and validates production compilation with `npm --prefix dashboard run build`.
+- **Docker Job**: Verifies Docker image builds for both the backend (`Dockerfile`) and dashboard (`dashboard/Dockerfile`) with `docker/build-push-action@v5` without pushing.
+- Uses dummy environment variables exclusively; no real credentials required. `REDIS_URL` is `redis://localhost:6379/0` - DB 0, same reasoning as the "Database & Cache Isolation" note above.
+
+## How to run tests
+```bash
+npm run lint             # ESLint over src/, tests/, scripts/
+npm test                 # full unit + integration suite (needs Mongo + Redis Stack reachable - see below)
+npm run test:unit        # just the fast, mock-only unit tests
+npm run test:integration # just the HTTP integration tests
+npm run test:coverage    # full suite with a coverage summary printed at the end
+```
+Needs a reachable MongoDB and a Redis **Stack** instance (`redis-stack-server`, for the RediSearch module - plain `redis` will fail the semantic cache index tests) - either already running locally, or via `npm run docker:up` (see "Docker" above) with `MONGO_URI`/`REDIS_URL` pointed at the exposed ports. All tests set `NODE_ENV=test` themselves, which routes Mongo to an isolated `-test` database and keeps Redis on DB 0 (see above) - no separate test-only `.env` file is required, but every env var listed in `.env.example` still needs *some* value (dummy values are fine - no test ever makes a real provider call, see "In-Process Provider Mocks" above).
+

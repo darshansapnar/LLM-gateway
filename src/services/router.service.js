@@ -6,7 +6,7 @@ import { env } from "../config/env.js";
 import { providers, streamingProviders } from "./providers/index.js";
 import { allowRequest, recordSuccess, recordFailure } from "./circuitBreaker.service.js";
 
-const BASE_BACKOFF_MS = 300;
+export const BASE_BACKOFF_MS = 300;
 
 // Maps a provider name to the model it's configured to use, so the cache
 // key (built from the PRIMARY provider's model) can be computed without
@@ -35,7 +35,7 @@ export function getPrimaryProvider() {
 // A 429, a 5xx, or our own synthetic timeout (status 408) are worth retrying -
 // they're usually transient. A 400 (bad request) or 401 (bad key) will fail
 // the exact same way every time, so retrying would just waste time.
-function isRetryable(error) {
+export function isRetryable(error) {
   const status = error.status;
   if (status === 408 || status === 429) return true;
   if (status >= 500 && status < 600) return true;

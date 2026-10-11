@@ -32,7 +32,7 @@ const createdRequestIds = [];
 // a full day) - a fixed prompt string would hit a PREVIOUS run's cached
 // answer instead of exercising the mock provider. Every test prompt below
 // includes this nonce so each run gets its own fresh cache key.
-const nonce = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+const nonce = `test-n${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
 
 // Swaps the primary provider (groq, per PROVIDER_ORDER) for a mock that
 // records the exact prompt it was called with and returns canned text.

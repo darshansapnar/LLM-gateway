@@ -27,10 +27,23 @@ function normalize(values) {
   return magnitude === 0 ? values : values.map((v) => v / magnitude);
 }
 
+let mockEmbedFn = null;
+
+export function setMockEmbed(fn) {
+  mockEmbedFn = fn;
+}
+
+export function resetMockEmbed() {
+  mockEmbedFn = null;
+}
+
 // Returns a normalized float array, or null if embedding failed for any
 // reason. Callers MUST treat null as "skip semantic caching for this
 // request" - an embedding failure should never break the actual chat request.
 export async function embed(text) {
+  if (mockEmbedFn) {
+    return mockEmbedFn(text);
+  }
   try {
     const response = await getClient().models.embedContent({
       model: env.EMBEDDING_MODEL,
