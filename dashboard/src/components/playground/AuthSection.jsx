@@ -1,13 +1,30 @@
 import { useState } from "react";
-import { Eye, EyeOff, KeyRound } from "lucide-react";
+import { Eye, EyeOff, KeyRound, Sparkles } from "lucide-react";
 
 // The gateway API key - kept in whatever state the parent gives it
 // (Playground.jsx uses useRememberedApiKey, which defaults to in-memory
 // only) and masked by default. Sent as "Authorization: Bearer <key>".
 // Never a provider key or the admin key - this field only ever holds the
 // per-caller gateway key a developer is testing with.
-export default function AuthSection({ apiKey, onChangeApiKey, remember, onChangeRemember }) {
+export default function AuthSection({ apiKey, onChangeApiKey, remember, onChangeRemember, isDemo = false }) {
   const [visible, setVisible] = useState(false);
+
+  if (isDemo) {
+    return (
+      <div className="rounded-xl border border-accent/20 bg-accent-soft p-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-1.5 text-xs font-semibold text-accent-soft-ink">
+            <Sparkles size={14} className="text-accent" />
+            Public Demo Mode
+          </div>
+          <span className="rounded bg-accent/20 px-2 py-0.5 text-[11px] font-semibold text-accent">No key required</span>
+        </div>
+        <p className="mt-1 text-xs text-ink-soft">
+          Requests run against the deployed gateway demo budget using the server's demo tier.
+        </p>
+      </div>
+    );
+  }
 
   return (
     <div>

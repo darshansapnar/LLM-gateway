@@ -26,8 +26,11 @@ const providerRequiredVars = providerOrder.flatMap((name) => PROVIDER_ENV_VARS[n
 const semanticCacheEnabled = (process.env.SEMANTIC_CACHE_ENABLED ?? "true") !== "false";
 const semanticCacheRequiredVars = semanticCacheEnabled ? ["GEMINI_API_KEY"] : [];
 
+// In production, DEMO_API_KEY is strictly required so public demo mode can run safely.
+const productionRequiredVars = process.env.NODE_ENV === "production" ? ["DEMO_API_KEY"] : [];
+
 const requiredVars = [
-  ...new Set([...baseRequiredVars, ...providerRequiredVars, ...semanticCacheRequiredVars]),
+  ...new Set([...baseRequiredVars, ...providerRequiredVars, ...semanticCacheRequiredVars, ...productionRequiredVars]),
 ];
 
 // Check that each required variable actually has a value.
@@ -35,6 +38,7 @@ const requiredVars = [
 if (process.env.NODE_ENV === "test") {
   process.env.PORT = process.env.PORT || "3000";
   process.env.ADMIN_API_KEY = process.env.ADMIN_API_KEY || "test-admin-secret-key-12345";
+  process.env.DEMO_API_KEY = process.env.DEMO_API_KEY || "gw_demo_test_key_12345";
   process.env.GROQ_API_KEY = process.env.GROQ_API_KEY || "gsk_test_dummy_key";
   process.env.GROQ_MODEL = process.env.GROQ_MODEL || "openai/gpt-oss-120b";
   process.env.GEMINI_API_KEY = process.env.GEMINI_API_KEY || "test_dummy_gemini_key";
@@ -124,4 +128,13 @@ export const env = {
   ADMIN_API_KEY: process.env.ADMIN_API_KEY,
   // Which origin the dashboard's browser requests are allowed to come from.
   DASHBOARD_ORIGIN: process.env.DASHBOARD_ORIGIN || "http://localhost:5173",
+  // Demo Mode (Public Gateway access without client API key)
+  DEMO_API_KEY: process.env.DEMO_API_KEY || "gw_demo_default_key",
+  DEMO_REQUESTS_PER_HOUR_PER_IP: Number(process.env.DEMO_REQUESTS_PER_HOUR_PER_IP) || 20,
+  DEMO_DAILY_REQUEST_BUDGET: Number(process.env.DEMO_DAILY_REQUEST_BUDGET) || 300,
+  DEMO_MAX_PROMPT_CHARS: Number(process.env.DEMO_MAX_PROMPT_CHARS) || 500,
+  DEMO_MAX_OUTPUT_TOKENS: Number(process.env.DEMO_MAX_OUTPUT_TOKENS) || 300,
+  // General security limits
+  MAX_PROMPT_CHARS: Number(process.env.MAX_PROMPT_CHARS) || 10000,
+  TRUST_PROXY: (process.env.TRUST_PROXY ?? "true") !== "false",
 };

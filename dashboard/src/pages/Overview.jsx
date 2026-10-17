@@ -1,7 +1,16 @@
 import { useState } from "react";
 import { Activity, CheckCircle2, Clock, DollarSign, Gauge, PiggyBank, ShieldCheck, Timer } from "lucide-react";
 import { usePolling } from "../hooks/usePolling.js";
-import { getOverview, getTimeseries, getProviders, getLogs } from "../api.js";
+import {
+  getOverview,
+  getTimeseries,
+  getProviders,
+  getLogs,
+  getDemoOverview,
+  getDemoTimeseries,
+  getDemoProviders,
+  getDemoRequests,
+} from "../api.js";
 import PageHeader from "../components/layout/PageHeader.jsx";
 import KpiCard from "../components/common/KpiCard.jsx";
 import ErrorBanner from "../components/common/ErrorBanner.jsx";
@@ -38,10 +47,22 @@ function piiBreakdownLabel(breakdown, blockedCount) {
 export default function Overview({ adminKey, onOpenMobileNav }) {
   const [range, setRange] = useState("24h");
 
-  const overview = usePolling(() => getOverview(adminKey, range), [adminKey, range]);
-  const timeseries = usePolling(() => getTimeseries(adminKey, range), [adminKey, range]);
-  const providers = usePolling(() => getProviders(adminKey, range), [adminKey, range]);
-  const recent = usePolling(() => getLogs(adminKey, { page: 1, limit: 5 }), [adminKey]);
+  const overview = usePolling(
+    () => (adminKey ? getOverview(adminKey, range) : getDemoOverview(range)),
+    [adminKey, range]
+  );
+  const timeseries = usePolling(
+    () => (adminKey ? getTimeseries(adminKey, range) : getDemoTimeseries(range)),
+    [adminKey, range]
+  );
+  const providers = usePolling(
+    () => (adminKey ? getProviders(adminKey, range) : getDemoProviders(range)),
+    [adminKey, range]
+  );
+  const recent = usePolling(
+    () => (adminKey ? getLogs(adminKey, { page: 1, limit: 5 }) : getDemoRequests(5)),
+    [adminKey]
+  );
 
   const anyError = overview.error || timeseries.error || providers.error;
   const anyLoading = overview.loading || timeseries.loading || providers.loading;
@@ -122,7 +143,9 @@ export default function Overview({ adminKey, onOpenMobileNav }) {
               <ul className="mt-3 divide-y divide-line">
                 {recent.data.logs.map((log) => (
                   <li key={log._id} className="flex items-center justify-between gap-3 py-2.5 text-sm">
-                    <span className="min-w-0 flex-1 truncate text-ink-soft">{log.prompt}</span>
+                    <span className="min-w-0 flex-1 truncate text-ink-soft">
+                      {log.prompt || (log.isOwner ? "(empty prompt)" : "Prompt hidden (visitor privacy)")}
+                    </span>
                     <span className="shrink-0 font-mono text-xs text-ink-muted">{formatLatency(log.latencyMs)}</span>
                     <span className="shrink-0 text-xs text-ink-muted">{formatRelativeTime(log.createdAt)}</span>
                     <Badge tone={requestStatusTone(log.status)}>{log.status}</Badge>

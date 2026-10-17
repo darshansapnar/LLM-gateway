@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { KeyRound } from "lucide-react";
+import { KeyRound, X } from "lucide-react";
 import { verifyAdminKey } from "../api.js";
 
 // Asks for the admin key and keeps it ONLY in component state (in memory) -
@@ -7,7 +7,7 @@ import { verifyAdminKey } from "../api.js";
 // or the page reloads. Verifies the key actually works (one real API call)
 // before "logging in", so a typo shows an error here instead of every page
 // silently failing with a 401.
-export default function Login({ onLogin }) {
+export default function Login({ onLogin, onCancel }) {
   const [input, setInput] = useState("");
   const [checking, setChecking] = useState(false);
   const [error, setError] = useState(null);
@@ -27,11 +27,23 @@ export default function Login({ onLogin }) {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-bg px-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-ink/40 p-4 backdrop-blur-sm">
+      <div className="absolute inset-0" onClick={onCancel} />
       <form
         onSubmit={handleSubmit}
-        className="flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-line bg-surface p-8 shadow-sm"
+        className="relative z-10 flex w-full max-w-sm flex-col gap-4 rounded-2xl border border-line bg-surface p-8 shadow-xl"
       >
+        {onCancel && (
+          <button
+            type="button"
+            onClick={onCancel}
+            className="absolute right-4 top-4 rounded-md p-1 text-ink-muted hover:bg-surface-2"
+            aria-label="Close"
+          >
+            <X size={18} />
+          </button>
+        )}
+
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-accent-soft text-accent">
             <KeyRound size={20} />
@@ -59,13 +71,24 @@ export default function Login({ onLogin }) {
 
         {error && <p className="rounded-lg bg-bad-bg px-3 py-2 text-xs text-bad-ink">{error}</p>}
 
-        <button
-          type="submit"
-          disabled={checking || !input}
-          className="mt-1 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
-        >
-          {checking ? "Checking…" : "Log in"}
-        </button>
+        <div className="mt-1 flex gap-2">
+          {onCancel && (
+            <button
+              type="button"
+              onClick={onCancel}
+              className="flex-1 rounded-lg border border-line px-3 py-2.5 text-sm font-medium text-ink-soft hover:bg-surface-2"
+            >
+              Cancel
+            </button>
+          )}
+          <button
+            type="submit"
+            disabled={checking || !input}
+            className="flex-1 rounded-lg bg-accent px-3 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-accent-strong disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {checking ? "Checking…" : "Log in"}
+          </button>
+        </div>
       </form>
     </div>
   );

@@ -19,8 +19,11 @@ import { sendPlainRequest, sendStreamingRequest } from "../lib/playground/sendRe
 import { useRememberedApiKey } from "../hooks/useRememberedApiKey.js";
 import { loadPersistedState, savePersistedState, clearPersistedState } from "../lib/playground/persistence.js";
 
-const DEFAULT_ENDPOINT = `${import.meta.env.VITE_API_URL || "http://localhost:3000"}/v1/chat`;
-const DEFAULT_BODY = JSON.stringify({ prompt: "Explain how LLM gateways work in simple terms." }, null, 2);
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const DEFAULT_DEMO_ENDPOINT = `${API_BASE}/demo/chat`;
+const DEFAULT_AUTH_ENDPOINT = `${API_BASE}/v1/chat`;
+const DEFAULT_ENDPOINT = DEFAULT_DEMO_ENDPOINT;
+const DEFAULT_BODY = JSON.stringify({ prompt: "How do I turn on dark mode in VS Code?" }, null, 2);
 
 function defaultHeaderRows() {
   return [
@@ -82,6 +85,8 @@ export function PlaygroundProvider({ children }) {
   const [bypassEnabled, setBypassEnabled] = useState(initial?.bypassEnabled ?? false);
   const [semanticCacheStatus, setSemanticCacheStatus] = useState("unknown");
   const [piiModeStatus, setPiiModeStatus] = useState("unknown");
+  const [demoRemaining, setDemoRemaining] = useState(null);
+  const [demoLimit, setDemoLimit] = useState(null);
 
   const [loading, setLoading] = useState(false);
   const [loadingLabel, setLoadingLabel] = useState("");
@@ -102,12 +107,15 @@ export function PlaygroundProvider({ children }) {
   }, [endpoint, headers, bodyText, streamEnabled, bypassEnabled, history]);
 
   function buildHeaderList() {
-    return headers.map((row) => {
-      if (row.key.trim().toLowerCase() === "authorization") {
-        return { key: row.key, value: apiKey ? `Bearer ${apiKey}` : "" };
-      }
-      return { key: row.key, value: row.value };
-    });
+    const isDemoEndpoint = endpoint.includes("/demo/chat");
+    return headers
+      .filter((row) => !(isDemoEndpoint && row.key.trim().toLowerCase() === "authorization" && !apiKey))
+      .map((row) => {
+        if (row.key.trim().toLowerCase() === "authorization") {
+          return { key: row.key, value: apiKey ? `Bearer ${apiKey}` : "" };
+        }
+        return { key: row.key, value: row.value };
+      });
   }
 
   function pushHistory(promptSent, finalResponse, snapshot) {
@@ -181,6 +189,12 @@ export function PlaygroundProvider({ children }) {
         const headersObj = headersToPlainObject(result.headers);
         if (headersObj["x-semantic-cache"]) setSemanticCacheStatus(headersObj["x-semantic-cache"]);
         if (headersObj["x-pii-mode"]) setPiiModeStatus(headersObj["x-pii-mode"]);
+        if (headersObj["x-ratelimit-remaining"] !== undefined) {
+          setDemoRemaining(Number(headersObj["x-ratelimit-remaining"]));
+        }
+        if (headersObj["x-ratelimit-limit"] !== undefined) {
+          setDemoLimit(Number(headersObj["x-ratelimit-limit"]));
+        }
 
         const streamFailed = Boolean(result.json?.error);
         const finalResponse = {
@@ -203,6 +217,12 @@ export function PlaygroundProvider({ children }) {
         const headersObj = headersToPlainObject(result.headers);
         if (headersObj["x-semantic-cache"]) setSemanticCacheStatus(headersObj["x-semantic-cache"]);
         if (headersObj["x-pii-mode"]) setPiiModeStatus(headersObj["x-pii-mode"]);
+        if (headersObj["x-ratelimit-remaining"] !== undefined) {
+          setDemoRemaining(Number(headersObj["x-ratelimit-remaining"]));
+        }
+        if (headersObj["x-ratelimit-limit"] !== undefined) {
+          setDemoLimit(Number(headersObj["x-ratelimit-limit"]));
+        }
 
         const finalResponse = {
           status: result.status,
@@ -230,7 +250,8 @@ export function PlaygroundProvider({ children }) {
   }
 
   function handleSend() {
-    if (!apiKey.trim()) {
+    const isDemoEndpoint = endpoint.includes("/demo/chat");
+    if (!isDemoEndpoint && !apiKey.trim()) {
       setFrontendError("Set a Gateway API Key first - it's sent as the Authorization header.");
       setResponse(null);
       return;
@@ -308,7 +329,8 @@ export function PlaygroundProvider({ children }) {
 
   function handleHistoryResend(item) {
     setBodyError(null);
-    if (!apiKey.trim()) {
+    const isDemoEndpoint = endpoint.includes("/demo/chat");
+    if (!isDemoEndpoint && !apiKey.trim()) {
       setFrontendError("Set a Gateway API Key first - it's sent as the Authorization header.");
       return;
     }
@@ -335,6 +357,8 @@ export function PlaygroundProvider({ children }) {
     setHistory([]);
   }
 
+  const isDemo = endpoint.includes("/demo/chat");
+
   const value = useMemo(
     () => ({
       endpoint,
@@ -354,6 +378,9 @@ export function PlaygroundProvider({ children }) {
       setBypassEnabled,
       semanticCacheStatus,
       piiModeStatus,
+      demoRemaining,
+      demoLimit,
+      isDemo,
       loading,
       loadingLabel,
       frontendError,
@@ -388,6 +415,9 @@ export function PlaygroundProvider({ children }) {
       bypassEnabled,
       semanticCacheStatus,
       piiModeStatus,
+      demoRemaining,
+      demoLimit,
+      isDemo,
       loading,
       loadingLabel,
       frontendError,

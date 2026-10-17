@@ -197,12 +197,32 @@ async function lookupSemanticCache(model, prompt, bypassCache, semanticCacheActi
 //                                          YES -> serve the cached answer
 //
 // { "stream": true } switches to a Server-Sent Events response instead -
-// see handleStreamingChat below.
-router.post("/v1/chat", auth, rateLimit, async (req, res) => {
+function demoLogFields(options) {
+  return {
+    visitorId: options?.visitorId ?? null,
+    clientIpHash: options?.clientIpHash ?? null,
+    isDemo: Boolean(options?.isDemo),
+  };
+}
+
+// Core execution pipeline shared by POST /v1/chat and POST /demo/chat.
+// Pipeline order: rate limit (checked prior) -> PII redaction -> exact cache ->
+// semantic cache -> providers -> restore -> response.
+export async function executeChatPipeline(req, res, options = {}) {
+  const apiKey = options.apiKey || req.apiKey;
+  const isDemo = Boolean(options.isDemo);
   const { prompt, stream } = req.body;
 
   if (!prompt || typeof prompt !== "string" || prompt.trim() === "") {
     return res.status(400).json({ error: "prompt is required and must be a non-empty string" });
+  }
+
+  const maxPromptChars = options.maxPromptChars || (isDemo ? env.DEMO_MAX_PROMPT_CHARS : env.MAX_PROMPT_CHARS);
+  if (maxPromptChars && prompt.length > maxPromptChars) {
+    const error = isDemo
+      ? `Prompt exceeds maximum allowed length of ${maxPromptChars} characters for demo mode`
+      : `Prompt exceeds maximum allowed length of ${maxPromptChars} characters`;
+    return res.status(400).json({ error });
   }
 
   // Generated up front (not left to Mongo's auto-generated one) so it can go
@@ -211,22 +231,22 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
   // The same value is passed to RequestLog.create's `_id` below/in
   // handleStreamingChat, so "X-Request-Id" really is that log entry's id.
   const requestId = new Types.ObjectId();
-  res.set("X-Semantic-Cache", semanticCacheHeaderValue(req.apiKey));
-  res.set("X-PII-Mode", piiModeHeaderValue(req.apiKey));
+  res.set("X-Semantic-Cache", semanticCacheHeaderValue(apiKey));
+  res.set("X-PII-Mode", piiModeHeaderValue(apiKey));
   res.set("X-Request-Id", String(requestId));
 
   // --- PII redaction (before anything else touches the prompt) ---
-  const pii = preparePii(req.apiKey, prompt);
+  const pii = preparePii(apiKey, prompt);
   const maskedPrompt = pii ? pii.maskedPrompt : prompt;
 
-  if (req.apiKey.piiMode === "block" && pii && piiCount(pii.session.counts) > 0) {
+  if (apiKey.piiMode === "block" && pii && piiCount(pii.session.counts) > 0) {
     const types = piiTypesOf(pii.session.counts);
     const count = piiCount(pii.session.counts);
     res.set("X-PII-Redacted", String(count));
 
     await RequestLog.create({
       _id: requestId,
-      apiKeyId: req.apiKey._id,
+      apiKeyId: apiKey._id,
       provider: "none",
       model: "none",
       prompt: maskedPrompt,
@@ -234,6 +254,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       status: "blocked",
       piiRedacted: count,
       piiTypes: types,
+      ...demoLogFields(options),
     });
 
     return res.status(422).json({
@@ -244,7 +265,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
   }
 
   if (stream === true) {
-    return handleStreamingChat(req, res, maskedPrompt, pii, requestId);
+    return handleStreamingChat(req, res, maskedPrompt, pii, requestId, apiKey, options);
   }
 
   const bypassCache = req.headers["x-cache-bypass"] === "true";
@@ -252,7 +273,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
   const primaryModel = getPrimaryModel();
   const primaryProvider = getPrimaryProvider();
   const startTime = Date.now();
-  const restoreInResponse = req.apiKey.restoreInResponse;
+  const restoreInResponse = apiKey.restoreInResponse;
 
   // --- Exact cache ---
   if (!bypassCache) {
@@ -277,7 +298,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
       await RequestLog.create({
         _id: requestId,
-        apiKeyId: req.apiKey._id,
+        apiKeyId: apiKey._id,
         provider: cached.provider,
         model: cached.model,
         prompt: maskedPrompt,
@@ -295,6 +316,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
         fallbackUsed,
         piiRedacted,
         piiTypes,
+        ...demoLogFields(options),
       });
 
       res.set("X-Cache", "HIT-EXACT");
@@ -323,11 +345,11 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
   // --- Semantic cache ---
   // Opt-in per key; exact caching above is unaffected and always runs.
-  if (env.SEMANTIC_CACHE_ENABLED && !req.apiKey.semanticCacheEnabled) {
+  if (env.SEMANTIC_CACHE_ENABLED && !apiKey.semanticCacheEnabled) {
     await recordSemanticSkippedOptOut();
   }
   const semanticCacheActive =
-    env.SEMANTIC_CACHE_ENABLED && req.apiKey.semanticCacheEnabled && !hasConversationHistory(req);
+    env.SEMANTIC_CACHE_ENABLED && apiKey.semanticCacheEnabled && !hasConversationHistory(req);
 
   const { embedding, match, verdict } = await lookupSemanticCache(
     primaryModel,
@@ -350,7 +372,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
     await RequestLog.create({
       _id: requestId,
-      apiKeyId: req.apiKey._id,
+      apiKeyId: apiKey._id,
       provider: match.data.provider,
       model: match.data.model,
       prompt: maskedPrompt,
@@ -371,6 +393,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       fallbackUsed,
       piiRedacted,
       piiTypes,
+      ...demoLogFields(options),
     });
 
     res.set("X-Cache", "HIT-SEMANTIC");
@@ -401,13 +424,13 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
   // --- Full miss: ask a provider, then save to both caches ---
   try {
-    const result = await askWithFallback(maskedPrompt);
+    const result = await askWithFallback(maskedPrompt, { maxTokens: options.maxOutputTokens });
     const latencyMs = Date.now() - startTime;
     const totalTokens = result.inputTokens + result.outputTokens;
     const costUsd = calculateCost(result.model, result.inputTokens, result.outputTokens);
     const fallbackUsed = result.provider !== primaryProvider;
 
-    await addTokenUsage(req.apiKey._id, totalTokens);
+    await addTokenUsage(apiKey._id, totalTokens);
 
     // The provider only ever saw maskedPrompt, so result.text is already
     // built from masked input - but the model can still echo real-looking
@@ -439,7 +462,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
     await RequestLog.create({
       _id: requestId,
-      apiKeyId: req.apiKey._id,
+      apiKeyId: apiKey._id,
       provider: result.provider,
       model: result.model,
       prompt: maskedPrompt,
@@ -458,6 +481,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       attempts: result.attempts,
       piiRedacted,
       piiTypes,
+      ...demoLogFields(options),
     });
 
     res.set("X-Cache", bypassCache ? "BYPASS" : "MISS");
@@ -487,7 +511,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 
     await RequestLog.create({
       _id: requestId,
-      apiKeyId: req.apiKey._id,
+      apiKeyId: apiKey._id,
       provider: "none",
       model: "none",
       prompt: maskedPrompt,
@@ -496,6 +520,7 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       errorMessage: error.message,
       ...judgeLogFields(verdict),
       attempts,
+      ...demoLogFields(options),
     });
 
     res.status(502).json({
@@ -505,6 +530,16 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
       requestId: String(requestId),
     });
   }
+}
+
+// POST /v1/chat - send a prompt through the provider gateway and get back
+// the response + usage + cost. Protected: requires a valid API key and
+// respects its rate limits.
+router.post("/v1/chat", auth, rateLimit, async (req, res) => {
+  return executeChatPipeline(req, res, {
+    apiKey: req.apiKey,
+    maxPromptChars: env.MAX_PROMPT_CHARS,
+  });
 });
 
 // Handles POST /v1/chat when the body has { "stream": true }. Keeps the
@@ -517,13 +552,13 @@ router.post("/v1/chat", auth, rateLimit, async (req, res) => {
 // `maskedPrompt` and `pii` (null if piiMode is "off") are already computed
 // by the caller - PII redaction and the block-mode check both have to
 // happen before we even decide whether to open an SSE stream.
-async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
+async function handleStreamingChat(req, res, maskedPrompt, pii, requestId, apiKey = req.apiKey, options = {}) {
   const bypassCache = req.headers["x-cache-bypass"] === "true";
   const cacheKey = buildCacheKey(getPrimaryModel(), maskedPrompt);
   const primaryModel = getPrimaryModel();
   const primaryProvider = getPrimaryProvider();
   const startTime = Date.now();
-  const restoreInResponse = req.apiKey.restoreInResponse;
+  const restoreInResponse = apiKey.restoreInResponse;
 
   // Only needed when there's something in the mapping to restore AND the
   // key wants it restored - otherwise every delta is forwarded exactly as
@@ -619,7 +654,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
 
     await RequestLog.create({
       _id: requestId,
-      apiKeyId: req.apiKey._id,
+      apiKeyId: apiKey._id,
       provider: data.provider,
       model: data.model,
       prompt: maskedPrompt,
@@ -639,6 +674,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
       ttftMs,
       piiRedacted,
       piiTypes,
+      ...demoLogFields(options),
     });
   }
 
@@ -654,11 +690,11 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
 
   // --- Semantic cache ---
   // Opt-in per key; exact caching above is unaffected and always runs.
-  if (env.SEMANTIC_CACHE_ENABLED && !req.apiKey.semanticCacheEnabled) {
+  if (env.SEMANTIC_CACHE_ENABLED && !apiKey.semanticCacheEnabled) {
     await recordSemanticSkippedOptOut();
   }
   const semanticCacheActive =
-    env.SEMANTIC_CACHE_ENABLED && req.apiKey.semanticCacheEnabled && !hasConversationHistory(req);
+    env.SEMANTIC_CACHE_ENABLED && apiKey.semanticCacheEnabled && !hasConversationHistory(req);
 
   const { embedding, match, verdict } = await lookupSemanticCache(
     primaryModel,
@@ -682,6 +718,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
   try {
     result = await askWithFallbackStream(maskedPrompt, {
       clientSignal: clientAbortController.signal,
+      maxTokens: options?.maxOutputTokens,
       onDelta: (delta) => {
         if (ttftMs === null) ttftMs = Date.now() - startTime;
         collectedText += delta; // raw provider output (built from maskedPrompt) - masked for real below
@@ -702,7 +739,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
 
     await RequestLog.create({
       _id: requestId,
-      apiKeyId: req.apiKey._id,
+      apiKeyId: apiKey._id,
       provider: "none",
       model: "none",
       prompt: maskedPrompt,
@@ -714,6 +751,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
       attempts: error.attempts || [],
       stream: true,
       ttftMs,
+      ...demoLogFields(options),
     });
     return;
   }
@@ -737,7 +775,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
 
   // The provider call genuinely completed, so we know the real token count -
   // charge for it and cache it even if the client left just before this point.
-  await addTokenUsage(req.apiKey._id, totalTokens);
+  await addTokenUsage(apiKey._id, totalTokens);
 
   const maskedAnswer = pii ? pii.session.mask(collectedText) : collectedText;
   const piiRedacted = pii ? piiCount(pii.session.counts) : 0;
@@ -786,7 +824,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
 
   await RequestLog.create({
     _id: requestId,
-    apiKeyId: req.apiKey._id,
+    apiKeyId: apiKey._id,
     provider: result.provider,
     model: result.model,
     prompt: maskedPrompt,
@@ -806,6 +844,7 @@ async function handleStreamingChat(req, res, maskedPrompt, pii, requestId) {
     ttftMs,
     piiRedacted,
     piiTypes,
+    ...demoLogFields(options),
   });
 }
 

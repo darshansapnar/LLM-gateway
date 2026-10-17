@@ -48,9 +48,20 @@ export default function ResponsePanel({ loading, loadingLabel, frontendError, re
           </div>
 
           {response.status === 429 && (
-            <div className="rounded-lg border border-warn-bg bg-warn-bg/50 px-3 py-2.5 text-sm text-warn-ink">
-              Rate limited — retry after {response.headersObj?.["retry-after"] ?? "?"}s.
-              {response.headersObj?.["x-ratelimit-limit"] && ` Limit: ${response.headersObj["x-ratelimit-limit"]}/min.`}
+            <div className="rounded-xl border border-warn/30 bg-warn-soft p-3.5 text-sm text-warn-ink">
+              <div className="font-semibold text-warn">
+                {response.json?.error?.includes("Demo limit reached for today")
+                  ? "Daily Demo Limit Reached"
+                  : response.json?.error || "Rate limit reached"}
+              </div>
+              <p className="mt-1 text-xs">
+                {response.json?.error || "Hourly limit exceeded."}
+              </p>
+              {response.headersObj?.["retry-after"] && (
+                <div className="mt-2 text-xs font-mono font-medium">
+                  Retry-After: {response.headersObj["retry-after"]} seconds
+                </div>
+              )}
             </div>
           )}
 

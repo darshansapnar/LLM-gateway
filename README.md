@@ -10,8 +10,23 @@ A middleware server between apps and AI providers (Groq, Gemini). Features:
 - Cost tracking
 - **PII redaction** - detects emails, phone numbers, card numbers, Aadhaar, PAN, and API keys/secrets in prompts, masks them before they reach the provider or any cache/database, and restores the real values only for the original caller. See [`docs/pii-redaction.md`](./docs/pii-redaction.md).
 - A React dashboard for monitoring and managing API keys
+- **Public Demo Mode** - Keyless demo chat and public dashboard metrics with per-IP rate limiting, daily budget, and visitor privacy isolation.
 
 See [`CLAUDE.md`](./CLAUDE.md) for the full technical write-up of how each piece works.
+
+## Live Demo
+
+Experience the gateway in action without an API key or local setup:
+
+- **Live Dashboard & Playground**: `https://demo.llm-gateway.example.com` *(Placeholder URL)*
+- **Public Chat Endpoint**: `POST https://demo.llm-gateway.example.com/demo/chat`
+
+The public demo mode includes:
+- **Keyless Playground**: Immediate testing with ready-made demo prompt chips (PII masking, exact cache hit, semantic cache hit, guard rejection, provider fallback).
+- **Safe by Default**: PII masking is permanently enforced on demo calls.
+- **Fair Use Budgets**: 20 requests/hour per IP, 300 requests/day global budget, 500 chars max prompt, 300 max output tokens.
+- **Visitor Privacy**: 24-hour anonymous visitor cookie (`visitorId`). Prompt and response text are only visible to the visitor who submitted them; raw client IPs are hashed with SHA-256 and never stored.
+- **Admin Lockout**: Admin tabs (`Requests`, `Providers`, `Cache`, `API Keys`) require signing in with an admin key.
 
 ## Run locally (without Docker)
 

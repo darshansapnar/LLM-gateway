@@ -73,7 +73,7 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function askWithFallback(prompt) {
+export async function askWithFallback(prompt, options = {}) {
   const attempts = [];
 
   for (const providerName of getProviderOrder()) {
@@ -92,7 +92,7 @@ export async function askWithFallback(prompt) {
 
       try {
         const result = await withTimeout(
-          (signal) => providerFn(prompt, signal),
+          (signal) => providerFn(prompt, signal, options),
           env.PROVIDER_TIMEOUT_MS
         );
 
@@ -136,7 +136,7 @@ export async function askWithFallback(prompt) {
 //   - after the first chunk: STREAM_IDLE_TIMEOUT_MS, reset on every new chunk
 // Either timeout - or the external `clientSignal` firing (the HTTP client
 // disconnected) - aborts the real request via the local AbortController.
-function runStreamAttempt(providerFn, prompt, clientSignal, onDelta) {
+function runStreamAttempt(providerFn, prompt, clientSignal, onDelta, maxTokens) {
   const controller = new AbortController();
 
   return new Promise((resolve, reject) => {
@@ -189,6 +189,7 @@ function runStreamAttempt(providerFn, prompt, clientSignal, onDelta) {
 
     providerFn(prompt, {
       signal: controller.signal,
+      maxTokens,
       onDelta: (delta) => {
         if (settled) return;
         if (!gotFirstChunk) {
@@ -210,7 +211,7 @@ function runStreamAttempt(providerFn, prompt, clientSignal, onDelta) {
 // chunk has been forwarded to the caller (tracked by `firstChunkSent`) -
 // once the client has started receiving an answer, switching providers would
 // mean restarting mid-sentence, so any failure after that point is final.
-export async function askWithFallbackStream(prompt, { onDelta, clientSignal }) {
+export async function askWithFallbackStream(prompt, { onDelta, clientSignal, maxTokens } = {}) {
   const attempts = [];
   let firstChunkSent = false;
 
@@ -232,7 +233,7 @@ export async function askWithFallbackStream(prompt, { onDelta, clientSignal }) {
         const result = await runStreamAttempt(providerFn, prompt, clientSignal, (delta) => {
           firstChunkSent = true;
           onDelta(delta);
-        });
+        }, maxTokens);
 
         attempts.push({
           provider: providerName,

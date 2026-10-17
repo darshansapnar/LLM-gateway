@@ -1,4 +1,5 @@
 import { useEffect, useMemo } from "react";
+import { Sparkles } from "lucide-react";
 import PageHeader from "../components/layout/PageHeader.jsx";
 import RequestBar from "../components/playground/RequestBar.jsx";
 import AuthSection from "../components/playground/AuthSection.jsx";
@@ -45,6 +46,9 @@ export default function Playground({ onOpenMobileNav, onNavigate, playgroundPref
     setBypassEnabled,
     semanticCacheStatus,
     piiModeStatus,
+    demoRemaining,
+    demoLimit,
+    isDemo,
     loading,
     loadingLabel,
     frontendError,
@@ -139,6 +143,24 @@ export default function Playground({ onOpenMobileNav, onNavigate, playgroundPref
       <PageHeader title="Playground" subtitle="Test your LLM Gateway with real requests." onOpenMobileNav={onOpenMobileNav} />
 
       <div className="flex flex-col gap-4">
+        {isDemo && (
+          <div className="flex flex-wrap items-center justify-between gap-2.5 rounded-xl border border-accent/20 bg-accent-soft px-4 py-2.5 text-xs text-accent-soft-ink">
+            <div className="flex items-center gap-2">
+              <Sparkles size={15} className="shrink-0 text-accent" />
+              <span>Public demo on free AI tiers. Don't enter personal or sensitive data.</span>
+            </div>
+            {demoRemaining !== null ? (
+              <span className="rounded-full bg-accent/20 px-2.5 py-0.5 font-semibold text-accent">
+                {demoRemaining} / {demoLimit || 20} requests left this hour
+              </span>
+            ) : (
+              <span className="rounded-full bg-accent/20 px-2.5 py-0.5 font-semibold text-accent">
+                Demo limit: 20 req/hour per IP
+              </span>
+            )}
+          </div>
+        )}
+
         <RequestBar
           endpoint={endpoint}
           onChangeEndpoint={setEndpoint}
@@ -156,6 +178,7 @@ export default function Playground({ onOpenMobileNav, onNavigate, playgroundPref
               onChangeApiKey={setApiKey}
               remember={rememberKey}
               onChangeRemember={setRememberKey}
+              isDemo={isDemo}
             />
             <HeadersEditor headers={headers} onChange={setHeaders} apiKey={apiKey} />
             <div>

@@ -20,11 +20,14 @@ function getClient() {
 // Sends a prompt to Gemini and returns the generated text plus token usage.
 // `signal` lets the caller (router.service.js) actually cancel the HTTP
 // request once PROVIDER_TIMEOUT_MS elapses, instead of just stopping its wait.
-export async function askGemini(prompt, signal) {
+export async function askGemini(prompt, signal, options = {}) {
   const result = await getClient().models.generateContent({
     model: env.GEMINI_MODEL,
     contents: prompt,
-    config: { abortSignal: signal },
+    config: {
+      abortSignal: signal,
+      ...(options.maxTokens ? { maxOutputTokens: options.maxTokens } : {}),
+    },
   });
 
   const usage = result.usageMetadata ?? {};
@@ -41,11 +44,14 @@ export async function askGemini(prompt, signal) {
 // arrives. Resolves with the same shape as askGemini once the stream ends.
 // Each chunk carries its own usageMetadata; the last chunk's is the final,
 // complete count, so we just keep overwriting as chunks arrive.
-export async function askGeminiStream(prompt, { signal, onDelta }) {
+export async function askGeminiStream(prompt, { signal, onDelta, maxTokens }) {
   const stream = await getClient().models.generateContentStream({
     model: env.GEMINI_MODEL,
     contents: prompt,
-    config: { abortSignal: signal },
+    config: {
+      abortSignal: signal,
+      ...(maxTokens ? { maxOutputTokens: maxTokens } : {}),
+    },
   });
 
   let text = "";

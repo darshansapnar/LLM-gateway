@@ -145,6 +145,37 @@ Packaging only - one exception: Docker surfaced a real, pre-existing bug in `ens
 - [x] Stage 7, Part 4: Playground page (real requests to the gateway, Postman-style)
 - [x] Stage 8: PII redaction (detect/mask/block sensitive data, per-key settings, dashboard support)
 - [x] Stage 9: Automated tests (unit + integration, mocked providers) + GitHub Actions CI
+- [x] Stage 10: Public Demo Mode (keyless /demo/chat, demo stats, visitor privacy isolation, public dashboard)
+
+## Public Demo Mode (Stage 10)
+Full public demo mode enabling deployed gateways to be testable without requiring an API key, without altering `/v1/chat` or `adminAuth` behavior:
+
+- **Keyless Chat Endpoint (`POST /demo/chat`)**:
+  - Reuses the exact same core pipeline as `/v1/chat` (`executeChatPipeline` in `chat.routes.js`): rate limiting, PII masking, exact + semantic cache, provider fallback, streaming, cost calculation, and logging.
+  - Automatically associates requests with an internal `DEMO_API_KEY` document in MongoDB with `piiMode: "mask"`, ensuring sensitive data is always masked.
+  - Limits enforced from env: `DEMO_REQUESTS_PER_HOUR_PER_IP` (default 20), `DEMO_DAILY_REQUEST_BUDGET` (default 300), `DEMO_MAX_PROMPT_CHARS` (default 500), `DEMO_MAX_OUTPUT_TOKENS` (default 300).
+  - Clear 429 status with `Retry-After` header: per-IP rate limit message and specific `"Demo limit reached for today. Please come back tomorrow or use your own API key."` when the daily budget is exhausted.
+- **Visitor Tracking & Privacy**:
+  - Anonymous visitor ID generated as random UUID and stored in an `httpOnly`, `sameSite: "lax"`, 24h cookie.
+  - `clientIpHash`: SHA-256 hash of the client IP is stored on `RequestLog`; raw IP addresses are **never** logged or stored.
+  - `RequestLog` tagged with `isDemo: true`, `visitorId`, and `clientIpHash`.
+- **Public Aggregated Stats (`GET /demo/stats/*`)**:
+  - `/demo/stats/overview`, `/demo/stats/timeseries`, `/demo/stats/providers`, `/demo/stats/cache`: aggregated metrics cached in Redis for ~10 seconds.
+  - `/demo/stats/requests`: recent requests list returning metadata only (timestamp, status, provider, latency, tokens, cost). Prompt and response text are returned **ONLY** for the visitor's own requests (matched via `visitorId` cookie).
+- **Public Frontend Mode**:
+  - When unauthenticated, dashboard opens immediately without a login barrier.
+  - Overview displays live demo metrics and sanitized recent requests.
+  - Request Flow simulated tab remains fully operational.
+  - Playground defaults to `POST /demo/chat`, hides API key input, shows ready-made demo prompt chips (PII mask demo, cache hit demo, semantic cache demo, guard rejection demo, fallback demo), notice banner ("Public demo on free AI tiers. Don't enter personal or sensitive data."), and an hourly remaining requests badge.
+  - Admin-only tabs (`Requests`, `Providers`, `Cache`, `API Keys`) display a clean `LockedTabPrompt` requiring admin login.
+  - Corner "Admin Sign In" button and sidebar sign-in button allow unlocking the full admin dashboard via modal login.
+- **Security & Hardening**:
+  - `TRUST_PROXY` env flag toggles Express `trust proxy` for reverse proxies (Render, Railway, Fly.io, Nginx).
+  - Strict CORS with `credentials: true` and exposed headers (`X-RateLimit-Limit`, `X-RateLimit-Remaining`, `Retry-After`, `X-Cache`, etc.).
+  - Request body parser limit tightened to 50kb JSON.
+  - Safety cap `MAX_PROMPT_CHARS` (default 10,000) applied across `/v1/chat`, and `DEMO_MAX_PROMPT_CHARS` (500) on `/demo/chat`.
+  - Production error handler hides stack traces.
+  - Server validation refuses to boot in production if `DEMO_API_KEY` is not defined.
 
 ## Remaining work
 Not started yet, roughly in order:

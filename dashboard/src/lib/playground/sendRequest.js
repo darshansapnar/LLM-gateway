@@ -49,7 +49,13 @@ export async function sendPlainRequest({ endpoint, headerList, bodyText, signal 
   const startedAt = performance.now();
   let response;
   try {
-    response = await fetch(endpoint, { method: "POST", headers: headersToObject(headerList), body: bodyText, signal });
+    response = await fetch(endpoint, {
+      method: "POST",
+      credentials: "include",
+      headers: headersToObject(headerList),
+      body: bodyText,
+      signal,
+    });
   } catch (err) {
     throw describeFailure(err, endpoint);
   }
@@ -77,7 +83,13 @@ export async function sendStreamingRequest({ endpoint, headerList, bodyText, sig
   const startedAt = performance.now();
   let response;
   try {
-    response = await fetch(endpoint, { method: "POST", headers: headersToObject(headerList), body: bodyText, signal });
+    response = await fetch(endpoint, {
+      method: "POST",
+      credentials: "include",
+      headers: headersToObject(headerList),
+      body: bodyText,
+      signal,
+    });
   } catch (err) {
     throw describeFailure(err, endpoint);
   }

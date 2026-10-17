@@ -4,10 +4,12 @@
 // (semantic hit, if the key has semantic caching on), and an antonym of it
 // (semantic candidate found but rejected by the guard).
 const EXAMPLES = [
-  { label: "Normal", prompt: "Explain how LLM gateways work in simple terms." },
-  { label: "Repeat last prompt", repeatLast: true },
-  { label: "Paraphrase", prompt: "Can you explain what an LLM gateway is?" },
-  { label: "Opposite", prompt: "How do I turn off dark mode in VS Code?" },
+  { label: "Normal prompt", prompt: "How do I turn on dark mode in VS Code?" },
+  { label: "PII mask demo", prompt: "My phone number is 9876543210 and email is alex@example.com." },
+  { label: "Cache hit demo", repeatLast: true },
+  { label: "Semantic cache demo", prompt: "Can you tell me how to enable dark theme in Visual Studio Code?" },
+  { label: "Guard rejection demo", prompt: "How do I turn off dark mode in VS Code?" },
+  { label: "Fallback demo", prompt: "Explain how an API gateway provides high availability through provider fallback." },
 ];
 
 export default function ExampleChips({ lastPrompt, onPick }) {

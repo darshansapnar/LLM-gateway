@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { LayoutDashboard, ListTree, Server, Database, KeyRound, Workflow, FlaskConical, Moon, Sun, X, LogOut } from "lucide-react";
+import { LayoutDashboard, ListTree, Server, Database, KeyRound, Workflow, FlaskConical, Moon, Sun, X, LogOut, Lock } from "lucide-react";
 import { getHealth } from "../../api.js";
 
 const NAV_ITEMS = [
@@ -47,11 +47,14 @@ const CONNECTION_STYLES = {
   down: { className: "bg-bad", label: "Can't reach gateway" },
 };
 
-function NavList({ activeTab, onSelect }) {
+const LOCKED_WITHOUT_ADMIN = new Set(["Requests", "Providers", "Cache", "API Keys"]);
+
+function NavList({ activeTab, onSelect, adminKey }) {
   return (
     <nav className="flex flex-1 flex-col gap-1 px-3">
       {NAV_ITEMS.map(({ id, label, icon: Icon }) => {
         const active = id === activeTab;
+        const isLocked = !adminKey && LOCKED_WITHOUT_ADMIN.has(id);
         return (
           <button
             key={id}
@@ -59,12 +62,15 @@ function NavList({ activeTab, onSelect }) {
             onClick={() => onSelect(id)}
             className={
               active
-                ? "flex items-center gap-2.5 rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-accent-soft-ink"
-                : "flex items-center gap-2.5 rounded-lg px-3 py-2 text-sm font-medium text-ink-soft hover:bg-surface-2"
+                ? "flex items-center justify-between rounded-lg bg-accent-soft px-3 py-2 text-sm font-medium text-accent-soft-ink"
+                : "flex items-center justify-between rounded-lg px-3 py-2 text-sm font-medium text-ink-soft hover:bg-surface-2"
             }
           >
-            <Icon size={17} strokeWidth={active ? 2.25 : 2} />
-            {label}
+            <div className="flex items-center gap-2.5">
+              <Icon size={17} strokeWidth={active ? 2.25 : 2} />
+              {label}
+            </div>
+            {isLocked && <Lock size={13} className="text-ink-muted" />}
           </button>
         );
       })}
@@ -72,10 +78,20 @@ function NavList({ activeTab, onSelect }) {
   );
 }
 
-// The left sidebar: logo, nav, connection dot, theme toggle, log out.
+// The left sidebar: logo, nav, connection dot, theme toggle, log out / admin login.
 // Renders as a fixed column on md+ screens and as a slide-over drawer
 // (controlled by `mobileOpen`/`onCloseMobile`) on small screens.
-export default function Sidebar({ activeTab, onSelect, theme, onToggleTheme, onLogout, mobileOpen, onCloseMobile }) {
+export default function Sidebar({
+  adminKey,
+  onOpenLogin,
+  activeTab,
+  onSelect,
+  theme,
+  onToggleTheme,
+  onLogout,
+  mobileOpen,
+  onCloseMobile,
+}) {
   const connection = useConnectionStatus();
   const connectionStyle = CONNECTION_STYLES[connection];
 
@@ -99,6 +115,7 @@ export default function Sidebar({ activeTab, onSelect, theme, onToggleTheme, onL
       </div>
 
       <NavList
+        adminKey={adminKey}
         activeTab={activeTab}
         onSelect={(id) => {
           onSelect(id);
@@ -107,9 +124,16 @@ export default function Sidebar({ activeTab, onSelect, theme, onToggleTheme, onL
       />
 
       <div className="mt-auto flex flex-col gap-3 border-t border-line px-4 py-4">
-        <div className="flex items-center gap-2 text-xs text-ink-muted">
-          <span className={`h-2 w-2 rounded-full ${connectionStyle.className}`} />
-          {connectionStyle.label}
+        <div className="flex items-center justify-between gap-2 text-xs text-ink-muted">
+          <div className="flex items-center gap-2">
+            <span className={`h-2 w-2 rounded-full ${connectionStyle.className}`} />
+            {connectionStyle.label}
+          </div>
+          {!adminKey ? (
+            <span className="rounded bg-accent/15 px-1.5 py-0.5 text-[10px] font-semibold text-accent">Demo</span>
+          ) : (
+            <span className="rounded bg-good/15 px-1.5 py-0.5 text-[10px] font-semibold text-good">Admin</span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
@@ -119,16 +143,29 @@ export default function Sidebar({ activeTab, onSelect, theme, onToggleTheme, onL
             className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-line px-3 py-1.5 text-xs font-medium text-ink-soft hover:bg-surface-2"
           >
             {theme === "dark" ? <Sun size={14} /> : <Moon size={14} />}
-            {theme === "dark" ? "Light mode" : "Dark mode"}
+            {theme === "dark" ? "Light" : "Dark"}
           </button>
-          <button
-            type="button"
-            onClick={onLogout}
-            title="Log out"
-            className="flex items-center justify-center rounded-lg border border-line px-2.5 py-1.5 text-ink-soft hover:bg-surface-2"
-          >
-            <LogOut size={14} />
-          </button>
+          {adminKey ? (
+            <button
+              type="button"
+              onClick={onLogout}
+              title="Sign out of admin mode"
+              className="flex items-center gap-1.5 rounded-lg border border-line px-2.5 py-1.5 text-xs text-ink-soft hover:bg-surface-2"
+            >
+              <LogOut size={14} />
+              <span>Log out</span>
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onOpenLogin}
+              title="Admin sign in"
+              className="flex items-center gap-1.5 rounded-lg bg-accent px-2.5 py-1.5 text-xs font-semibold text-white hover:bg-accent-strong"
+            >
+              <KeyRound size={14} />
+              <span>Sign In</span>
+            </button>
+          )}
         </div>
       </div>
     </div>

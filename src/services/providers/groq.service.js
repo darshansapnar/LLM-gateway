@@ -9,11 +9,12 @@ const groq = new Groq({ apiKey: env.GROQ_API_KEY });
 // Sends a prompt to Groq and returns the generated text plus token usage.
 // `signal` lets the caller (router.service.js) actually cancel the HTTP
 // request once PROVIDER_TIMEOUT_MS elapses, instead of just stopping its wait.
-export async function askGroq(prompt, signal) {
+export async function askGroq(prompt, signal, options = {}) {
   const completion = await groq.chat.completions.create(
     {
       model: env.GROQ_MODEL,
       messages: [{ role: "user", content: prompt }],
+      ...(options.maxTokens ? { max_tokens: options.maxTokens } : {}),
     },
     { signal }
   );
@@ -31,12 +32,13 @@ export async function askGroq(prompt, signal) {
 // Streams a prompt to Groq, calling onDelta with each text piece as it
 // arrives. Resolves with the same shape as askGroq once the stream ends.
 // Groq only sends token usage on the final chunk, under `x_groq.usage`.
-export async function askGroqStream(prompt, { signal, onDelta }) {
+export async function askGroqStream(prompt, { signal, onDelta, maxTokens }) {
   const stream = await groq.chat.completions.create(
     {
       model: env.GROQ_MODEL,
       messages: [{ role: "user", content: prompt }],
       stream: true,
+      ...(maxTokens ? { max_tokens: maxTokens } : {}),
     },
     { signal }
   );

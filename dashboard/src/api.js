@@ -21,6 +21,44 @@ async function request(path, { method = "GET", adminKey, body } = {}) {
   return response.json();
 }
 
+async function requestPublic(path, { method = "GET", body } = {}) {
+  const response = await fetch(`${API_URL}${path}`, {
+    method,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({}));
+    throw new Error(payload.error || `Request failed (${response.status})`);
+  }
+
+  return response.json();
+}
+
+export function getDemoOverview(range = "24h") {
+  return requestPublic(`/demo/stats/overview?range=${range}`);
+}
+
+export function getDemoTimeseries(range = "24h") {
+  return requestPublic(`/demo/stats/timeseries?range=${range}`);
+}
+
+export function getDemoProviders(range = "24h") {
+  return requestPublic(`/demo/stats/providers?range=${range}`);
+}
+
+export function getDemoCacheStats() {
+  return requestPublic("/demo/stats/cache");
+}
+
+export function getDemoRequests(limit = 10) {
+  return requestPublic(`/demo/stats/requests?limit=${limit}`);
+}
+
 export function getOverview(adminKey, range) {
   return request(`/v1/admin/overview?range=${range}`, { adminKey });
 }

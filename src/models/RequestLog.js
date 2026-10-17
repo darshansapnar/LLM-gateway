@@ -58,6 +58,12 @@ const requestLogSchema = new mongoose.Schema({
       latencyMs: Number,
     },
   ],
+  // Public Demo mode tagging (Stage 10)
+  // visitorId is stored from the anonymous 24h httpOnly cookie
+  visitorId: { type: String, default: null, index: true },
+  // Hashed client IP (SHA-256), NEVER the raw IP address
+  clientIpHash: { type: String, default: null, index: true },
+  isDemo: { type: Boolean, default: false, index: true },
   createdAt: { type: Date, default: Date.now },
 });
 
