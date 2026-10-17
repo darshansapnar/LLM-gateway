@@ -22,11 +22,32 @@ if (env.TRUST_PROXY) {
   app.set("trust proxy", true);
 }
 
-// Lets the dashboard's browser (running on DASHBOARD_ORIGIN) call this API.
+// Lets the dashboard's browser call this API.
 // credentials: true allows httpOnly cookies (such as visitorId) across origins.
+// When credentials: true is set, browsers forbid Access-Control-Allow-Origin: *;
+// the origin must be specifically reflected.
+const configuredOrigins = (env.DASHBOARD_ORIGIN || "")
+  .split(",")
+  .map((o) => o.trim().replace(/\/$/, ""))
+  .filter(Boolean);
+
 app.use(
   cors({
-    origin: env.DASHBOARD_ORIGIN,
+    origin: (origin, callback) => {
+      // Allow requests with no origin (such as curl, server-to-server tools)
+      if (!origin) return callback(null, true);
+      const cleanOrigin = origin.replace(/\/$/, "");
+      if (
+        configuredOrigins.includes("*") ||
+        configuredOrigins.includes(cleanOrigin) ||
+        cleanOrigin.endsWith(".vercel.app") ||
+        cleanOrigin.includes("localhost") ||
+        cleanOrigin.includes("127.0.0.1")
+      ) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} not allowed by CORS`));
+    },
     credentials: true,
     methods: ["GET", "POST", "PATCH", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "x-admin-key", "x-cache-bypass"],
