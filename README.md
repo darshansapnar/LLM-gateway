@@ -18,8 +18,8 @@ See [`CLAUDE.md`](./CLAUDE.md) for the full technical write-up of how each piece
 
 Experience the gateway in action without an API key or local setup:
 
-- **Live Dashboard & Playground**: `https://demo.llm-gateway.example.com` *(Placeholder URL)*
-- **Public Chat Endpoint**: `POST https://demo.llm-gateway.example.com/demo/chat`
+- **Live Dashboard & Playground**: [https://llm-gateway-ebon.vercel.app](https://llm-gateway-ebon.vercel.app)
+- **Public Chat Endpoint**: `POST https://llm-gateway-api-8clg.onrender.com/demo/chat`
 
 The public demo mode includes:
 - **Keyless Playground**: Immediate testing with ready-made demo prompt chips (PII masking, exact cache hit, semantic cache hit, guard rejection, provider fallback).
